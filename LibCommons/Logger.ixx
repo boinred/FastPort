@@ -29,38 +29,38 @@ public:
     void Shutdown();
 
     template<typename ... Args>
-    void LogDebug(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    void LogDebug(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
         Log(categaryName, spdlog::level::level_enum::debug, fmt, args...);
     }
 
     template<typename ... Args>
-    void LogWarning(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    void LogWarning(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
         Log(categaryName, spdlog::level::level_enum::warn, fmt, args...);
     }
 
     template<typename ... Args>
-    void LogInfo(const std::string categaryName, std::format_string<Args...> fmt, Args &&...args)
+    void LogInfo(const std::string categaryName, spdlog::string_view_t fmt, Args &&...args)
     {
         Log(categaryName, spdlog::level::level_enum::info, fmt, args...);
     }
 
     template<typename ... Args>
-    void LogError(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    void LogError(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
         Log(categaryName, spdlog::level::level_enum::err, fmt, args...);
     }
 
     template<typename ... Args>
-    void LogCritical(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    void LogCritical(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
         Log(categaryName, spdlog::level::level_enum::critical, fmt, args...);
     }
 
 protected:
     template<typename ... Args>
-    void Log(const std::string categaryName, spdlog::level::level_enum lvl, std::format_string<Args...> fmt, Args&&... args)
+    void Log(const std::string categaryName, spdlog::level::level_enum lvl, spdlog::string_view_t fmt, Args&&... args)
     {
         auto pLogger = spdlog::get(categaryName);
         if (!pLogger)
@@ -70,17 +70,16 @@ protected:
             pLogger = spdlog::get(categaryName);
         }
 
-        const auto message = std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...));
         if (pLogger)
         {
 
-            pLogger->log(lvl, message);
+            pLogger->log(lvl, fmt, std::forward<Args>(args)...);
         }
 
         auto pConsoleLogger = m_pConsoleLogger;
         if (pConsoleLogger)
         {
-            pConsoleLogger->log(lvl, message);
+            pConsoleLogger->log(lvl, fmt, std::forward<Args>(args)...);
         }
     }
 

@@ -29,7 +29,7 @@ int main()
 	// Create Logger 
 	LibCommons::Logger::GetInstance().Create(location + "/" + "loggers", fileName, 1024 * 1024 * 10, 3, bServiceMode);
 
-	//LibCommons::Logger::GetInstance().LogInfo("FastPortClient", "Test logger.");
+	LibCommons::Logger::GetInstance().LogInfo("FastPortClient", "Test logger.");
 
 	//spdlog::info("Hello, {}!", "world");
 }
