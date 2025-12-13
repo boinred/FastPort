@@ -8,6 +8,7 @@
     <File Path="vcpkg-configuration.json" />
     <File Path="vcpkg.json" />
   </Folder>
+  <Project Path="FastPortClient/FastPortClient.vcxproj" Id="f5a0ad86-da01-49cf-9b8a-3dafa82b1b44" />
   <Project Path="LibCommons/LibCommons.vcxproj" Id="4f7088d5-e65b-4b71-97bf-91019bb758c5" />
   <Project Path="LibNetworks/LibNetworks.vcxproj" Id="82bd6e86-a438-4a32-847c-229e1d77ffa8" />
 </Solution>
