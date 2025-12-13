@@ -2,10 +2,12 @@ module;
 
 #include <Windows.h>
 #include <memory>
-
-import std;
+#include <string>
 
 export module commons.service_mode;
+
+
+import commons.strconverter; 
 
 namespace LibCommons
 {
@@ -64,8 +66,9 @@ protected:
     virtual const DWORD GetStartType() const = 0;
 
 
-    std::string GetServiceNameAnsi() const;
-    std::string GetDisplayNameAnsi();
+    std::string GetServiceNameAnsi() const { return StrConverter::ToAnsi(GetServiceName()); }
+
+    std::string GetDisplayNameAnsi() { return StrConverter::ToAnsi(GetDisplayName()); }
     //----------------------------------------------------------------
 
     virtual std::wstring GetDependencies() { return L""; }

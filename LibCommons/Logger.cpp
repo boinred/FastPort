@@ -3,6 +3,8 @@ module;
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/async.h>
 #include <spdlog/spdlog.h>
+#include <filesystem>
+#include <iostream>
 
 module commons.logger;
 

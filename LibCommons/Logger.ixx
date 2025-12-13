@@ -1,27 +1,93 @@
 module;
 
 #include <memory>
+#include <string>
+#include <unordered_set>
+#include <format>
 
 #include <spdlog/logger.h>
 #include <spdlog/common.h>
+#include <spdlog/spdlog.h>
+
 
 export module commons.logger;
 
-import std;
 import commons.rwlock;
+import commons.singleton;
 
 export namespace LibCommons
 {
-class Logger
+class Logger : public SingleTon<Logger>
 {
+private:
+    friend class SingleTon<Logger>;
+    Logger() = default;
+
 public:
     void Create(const std::string directoryName, const std::string fileName, const int maxFileSize, const int maxFileCount, const bool bServiceMode = false);
 
     void Shutdown();
 
+    template<typename ... Args>
+    void LogDebug(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    {
+        Log(categaryName, spdlog::level::level_enum::debug, fmt, args...);
+    }
+
+    template<typename ... Args>
+    void LogWarning(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    {
+        Log(categaryName, spdlog::level::level_enum::warn, fmt, args...);
+    }
+
+    template<typename ... Args>
+    void LogInfo(const std::string categaryName, std::format_string<Args...> fmt, Args &&...args)
+    {
+        Log(categaryName, spdlog::level::level_enum::info, fmt, args...);
+    }
+
+    template<typename ... Args>
+    void LogError(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    {
+        Log(categaryName, spdlog::level::level_enum::err, fmt, args...);
+    }
+
+    template<typename ... Args>
+    void LogCritical(const std::string categaryName, std::format_string<Args...> fmt, Args&&... args)
+    {
+        Log(categaryName, spdlog::level::level_enum::critical, fmt, args...);
+    }
+
+protected:
+    template<typename ... Args>
+    void Log(const std::string categaryName, spdlog::level::level_enum lvl, std::format_string<Args...> fmt, Args&&... args)
+    {
+        auto pLogger = spdlog::get(categaryName);
+        if (!pLogger)
+        {
+            AddCategory(categaryName);
+
+            pLogger = spdlog::get(categaryName);
+        }
+
+        const auto message = std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...));
+        if (pLogger)
+        {
+
+            pLogger->log(lvl, message);
+        }
+
+        auto pConsoleLogger = m_pConsoleLogger;
+        if (pConsoleLogger)
+        {
+            pConsoleLogger->log(lvl, message);
+        }
+    }
+
 private:
     void AddCategory(const std::string& categoryName);
 
+private:
     RWLock m_Lock;
 
     bool m_bServiceMode = false;
@@ -39,4 +105,3 @@ private:
 };
 
 } // namespace LibCommons
-

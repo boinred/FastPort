@@ -1,9 +1,9 @@
 module;
 #include <Windows.h>
-
+#include <string>
 export module commons.strconverter;
 
-import std;
+
 
 namespace LibCommons
 {

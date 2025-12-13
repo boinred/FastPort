@@ -5,10 +5,10 @@ module;
 
 export module commons.rwlock;
 
-export namespace LibCommons
+namespace LibCommons
 {
 
-class RWLock
+export class RWLock
 {
 public:
 	RWLock();
@@ -54,11 +54,11 @@ private:
 	RWLock& m_rfRWLock;
 };
 
-[[nodiscard]] inline ReferenceReadLockBlock ReadLockBlock(LibCommons::RWLock& rwLock)
+export [[nodiscard]] inline ReferenceReadLockBlock ReadLockBlock(LibCommons::RWLock& rwLock)
 {
 	return ReferenceReadLockBlock(rwLock);
 }
-[[nodiscard]] inline ReferenceWriteLockBlock WriteLockBlock(LibCommons::RWLock& rwLock)
+export [[nodiscard]] inline ReferenceWriteLockBlock WriteLockBlock(LibCommons::RWLock& rwLock)
 {
 	return ReferenceWriteLockBlock(rwLock);
 }

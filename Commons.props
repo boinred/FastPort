@@ -11,6 +11,7 @@
       <BuildStlModules>true</BuildStlModules>
       <PrecompiledHeaderFile />
       <PrecompiledHeaderOutputFile />
+      <EnableModules>false</EnableModules>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup />
