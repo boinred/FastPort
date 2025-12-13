@@ -1,13 +1,14 @@
 module;
 
 #include <memory>
-#include <spdlog/spdlog.h>
+
 #include <spdlog/logger.h>
 #include <spdlog/common.h>
 
 export module commons.logger;
 
 import std;
+import commons.rwlock;
 
 export namespace LibCommons
 {
@@ -21,7 +22,7 @@ public:
 private:
     void AddCategory(const std::string& categoryName);
 
-    //RWLock m_Lock;
+    RWLock m_Lock;
 
     bool m_bServiceMode = false;
 
