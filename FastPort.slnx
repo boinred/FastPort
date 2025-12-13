@@ -1,0 +1,13 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/솔루션 항목/">
+    <File Path=".gitignore" />
+    <File Path="vcpkg-configuration.json" />
+    <File Path="vcpkg.json" />
+  </Folder>
+  <Project Path="LibCommons/LibCommons.vcxproj" Id="4f7088d5-e65b-4b71-97bf-91019bb758c5" />
+  <Project Path="LibNetworks/LibNetworks.vcxproj" Id="82bd6e86-a438-4a32-847c-229e1d77ffa8" />
+</Solution>
