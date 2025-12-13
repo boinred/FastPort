@@ -11,7 +11,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Module.ixx">
+    <ClCompile Include="IOConsumer.ixx">
       <Filter>소스 파일</Filter>
     </ClCompile>
   </ItemGroup>

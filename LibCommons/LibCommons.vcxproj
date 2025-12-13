@@ -23,6 +23,7 @@
     <ClCompile Include="Logger.ixx" />
     <ClCompile Include="RWLock.cpp" />
     <ClCompile Include="RWLock.ixx" />
+    <ClCompile Include="StrConverter.ixx" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
