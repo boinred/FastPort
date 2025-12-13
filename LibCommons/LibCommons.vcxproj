@@ -23,6 +23,9 @@
     <ClCompile Include="Logger.ixx" />
     <ClCompile Include="RWLock.cpp" />
     <ClCompile Include="RWLock.ixx" />
+    <ClCompile Include="ServiceMode.cpp" />
+    <ClCompile Include="ServiceMode.ixx" />
+    <ClCompile Include="SingleTon.ixx" />
     <ClCompile Include="StrConverter.ixx" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
