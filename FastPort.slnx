@@ -5,6 +5,7 @@
   </Configurations>
   <Folder Name="/솔루션 항목/">
     <File Path=".gitignore" />
+    <File Path="README.md" />
     <File Path="vcpkg-configuration.json" />
     <File Path="vcpkg.json" />
   </Folder>

@@ -8,10 +8,12 @@
 
 import commons.rwlock;
 import commons.logger;
-
+import networks.services.io_service;
 int main()
 {
 	std::string location;
+
+	LibNetworks::Services::IOService ioService;
 
 	bool bServiceMode = true;
 	//#if _DEBUG

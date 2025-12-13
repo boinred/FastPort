@@ -1,10 +1,11 @@
 module;
 #include <windows.h>
-export module networks.services.ioconsumer;
+export module networks.services.io_consumer;
 
-export namespace LibNetworks::Services
+namespace LibNetworks::Services
 {
-class IIOConsumer
+
+export class IIOConsumer
 {
 public:
 
@@ -15,4 +16,5 @@ public:
 		return reinterpret_cast<ULONG_PTR>(this);
 	}
 };
+
 } // export namespace LibNetworks::Services
