@@ -1,4 +1,4 @@
-module;
+﻿module;
 #include <windows.h>
 #include <vector>
 #include <thread>
@@ -12,6 +12,8 @@ export class IOService
 {
 public:
     IOService();
+    ~IOService();
+
     IOService(const IOService&) = delete;
 
     bool Start(unsigned int numThreads);
@@ -20,7 +22,7 @@ public:
 
     void Wait();
 
-    bool Associate(SOCKET& rfSocket, ULONG_PTR ulCompletionKey);
+    bool Associate(SOCKET& rfSocket, ULONG_PTR completionId);
 
     bool Post(ULONG_PTR uCompletionKey, DWORD bytes = 0, OVERLAPPED* ov = nullptr);
 

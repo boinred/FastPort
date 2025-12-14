@@ -4,6 +4,7 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/솔루션 항목/">
+    <File Path=".editorconfig" />
     <File Path=".gitignore" />
     <File Path="README.md" />
     <File Path="vcpkg-configuration.json" />

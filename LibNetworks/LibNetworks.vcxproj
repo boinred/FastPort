@@ -22,6 +22,8 @@
     <ClCompile Include="IOConsumer.ixx" />
     <ClCompile Include="iOService.cpp" />
     <ClCompile Include="IOService.ixx" />
+    <ClCompile Include="Socket.cpp" />
+    <ClCompile Include="Socket.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">

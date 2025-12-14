@@ -1,11 +1,11 @@
-module;
+﻿module;
 
 #include <cxxopts.hpp>
 #include <Windows.h>
 #include <assert.h>
 #include <iostream>
 #include <thread>
-
+#include <spdlog/spdlog.h>
 module commons.service_mode;
 
 import commons.strconverter;
@@ -20,14 +20,15 @@ std::shared_ptr<ServiceMode> ServiceMode::m_pServiceMode;
 
 bool ServiceMode::Installer::Install(LPCWSTR ServiceName, LPCWSTR DisplayName, DWORD dwStartType, LPCWSTR Dependencies, LPCWSTR Account, LPCWSTR password)
 {
-     auto & logger = LibCommons::Logger::GetInstance();
+    auto& logger = LibCommons::Logger::GetInstance();
 
     // Open the local default service control manager database.
     SC_HANDLE hManager = ::OpenSCManager(nullptr, nullptr, SC_MANAGER_CONNECT | SC_MANAGER_CREATE_SERVICE);
     assert(nullptr != hManager);
     if (nullptr == hManager)
     {
-        // logger.LogError("ServiceMode", "Install, SCManager open is failed. Error : {}", ::GetLastError());
+        //spdlog::info("Hello, {}!", "world");
+        logger.LogError("ServiceMode", "Install, SCManager open is failed. Error : {}", ::GetLastError());
 
         return false;
     }
@@ -52,13 +53,13 @@ bool ServiceMode::Installer::Install(LPCWSTR ServiceName, LPCWSTR DisplayName, D
 
     if (nullptr == hService)
     {
-        //logger.LogError(
-        //    "ServiceMode",
-        //    "Service is install failed. Service Name : {}, Display Name : {}, Path : {}, Error : {}",
-        //    StrConverter::ToAnsi(ServiceName),
-        //    StrConverter::ToAnsi(DisplayName),
-        //    StrConverter::ToAnsi(moduleFileName),
-        //    ::GetLastError());
+        logger.LogError(
+            "ServiceMode",
+            "Service is install failed. Service Name : {}, Display Name : {}, Path : {}, Error : {}",
+            StrConverter::ToAnsi(ServiceName),
+            StrConverter::ToAnsi(DisplayName),
+            StrConverter::ToAnsi(moduleFileName),
+            ::GetLastError());
 
 
         ::CloseServiceHandle(hManager);
@@ -66,12 +67,12 @@ bool ServiceMode::Installer::Install(LPCWSTR ServiceName, LPCWSTR DisplayName, D
         return false;
     }
 
-    /*LibCommons::Logger::GetInstance().LogInfo(
+    logger.LogInfo(
         "ServiceMode",
         "Service is install success. Service Name : {}, Display Name : {}, Path : {}",
         StrConverter::ToAnsi(ServiceName),
         StrConverter::ToAnsi(DisplayName),
-        StrConverter::ToAnsi(moduleFileName));*/
+        StrConverter::ToAnsi(moduleFileName));
 
     ::CloseServiceHandle(hManager);
     ::CloseServiceHandle(hService);
@@ -94,7 +95,7 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
     if (nullptr == hManager)
     {
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Stop, SCManager open is failed. Error : {}", ::GetLastError());
+         LibCommons::Logger::GetInstance().LogError("ServiceMode", "Stop, SCManager open is failed. Error : {}", ::GetLastError());
         return false;
     }
 
