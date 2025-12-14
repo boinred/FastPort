@@ -31,31 +31,31 @@ public:
     template<typename ... Args>
     void LogDebug(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
-        Log(categaryName, spdlog::level::level_enum::debug, fmt, args...);
+        Log(categaryName, spdlog::level::level_enum::debug, fmt, std::forward<Args>(args)...);
     }
 
     template<typename ... Args>
     void LogWarning(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
-        Log(categaryName, spdlog::level::level_enum::warn, fmt, args...);
+        Log(categaryName, spdlog::level::level_enum::warn, fmt, std::forward<Args>(args)...);
     }
 
     template<typename ... Args>
     void LogInfo(const std::string categaryName, spdlog::string_view_t fmt, Args &&...args)
     {
-        Log(categaryName, spdlog::level::level_enum::info, fmt, args...);
+        Log(categaryName, spdlog::level::level_enum::info, fmt, std::forward<Args>(args)...);
     }
 
     template<typename ... Args>
     void LogError(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
-        Log(categaryName, spdlog::level::level_enum::err, fmt, args...);
+        Log(categaryName, spdlog::level::level_enum::err, fmt, std::forward<Args>(args)...);
     }
 
     template<typename ... Args>
     void LogCritical(const std::string categaryName, spdlog::string_view_t fmt, Args&&... args)
     {
-        Log(categaryName, spdlog::level::level_enum::critical, fmt, args...);
+        Log(categaryName, spdlog::level::level_enum::critical, fmt, std::forward<Args>(args)...);
     }
 
 protected:
@@ -72,14 +72,13 @@ protected:
 
         if (pLogger)
         {
-
-            pLogger->log(lvl, fmt, std::forward<Args>(args)...);
+            pLogger->log(lvl, spdlog::fmt_lib::runtime(fmt), args...);
         }
 
         auto pConsoleLogger = m_pConsoleLogger;
         if (pConsoleLogger)
         {
-            pConsoleLogger->log(lvl, fmt, std::forward<Args>(args)...);
+            pConsoleLogger->log(lvl, spdlog::fmt_lib::runtime(fmt), std::forward<Args>(args)...);
         }
     }
 
