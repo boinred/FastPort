@@ -3,7 +3,8 @@
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <IntDir>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir>$(SolutionDir)\_Intermediate\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <OutDir>$(SolutionDir)\_Builds\$(Platform)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -20,7 +21,7 @@
       </Command>
     </PreBuildEvent>
     <BuildLog>
-      <Path>$(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName)\$(MSBuildProjectName).log</Path>
+      <Path>$(SolutionDir)\_Intermediate\$(Platform)\$(Configuration)\$(ProjectName)\$(MSBuildProjectName).log</Path>
     </BuildLog>
   </ItemDefinitionGroup>
   <ItemGroup />
