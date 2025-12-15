@@ -19,9 +19,19 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="InboundSession.cpp" />
+    <ClCompile Include="InboundSession.ixx" />
     <ClCompile Include="IOConsumer.ixx" />
     <ClCompile Include="iOService.cpp" />
     <ClCompile Include="IOService.ixx" />
+    <ClCompile Include="IOSession.cpp" />
+    <ClCompile Include="IOSession.ixx" />
+    <ClCompile Include="IOSocketConnector.cpp" />
+    <ClCompile Include="IOSocketConnector.ixx" />
+    <ClCompile Include="IOSocketListener.cpp" />
+    <ClCompile Include="IOSocketListener.ixx" />
+    <ClCompile Include="OutboundSession.cpp" />
+    <ClCompile Include="OutboundSession.ixx" />
     <ClCompile Include="Socket.cpp" />
     <ClCompile Include="Socket.ixx" />
   </ItemGroup>

@@ -1,8 +1,8 @@
-module;
+﻿module;
 #include <windows.h>
-export module networks.services.io_consumer;
+export module networks.core.io_consumer;
 
-namespace LibNetworks::Services
+namespace LibNetworks::Core
 {
 
 export class IIOConsumer

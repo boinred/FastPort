@@ -6,7 +6,7 @@ module networks.services.io_service;
 
 import commons.logger;
 import commons.rwlock; 
-import networks.services.io_consumer;
+import networks.core.io_consumer;
 
 namespace LibNetworks::Services
 {
@@ -62,7 +62,7 @@ bool IOService::Start(unsigned int numThreads)
                     {
                         logger.LogError("IOService", "Worker thread, Connection closed. Error: {}", dwError);
 
-                        auto pConsumer = reinterpret_cast<IIOConsumer*>(completionId);
+                        auto pConsumer = reinterpret_cast<Core::IIOConsumer*>(completionId);
                         if (pConsumer)
                         {
                             pConsumer->OnIOCompleted(false, bytesTransferred, pOverlapped);
@@ -80,7 +80,7 @@ bool IOService::Start(unsigned int numThreads)
                     break;
                 }
 
-                auto pConsumer = reinterpret_cast<IIOConsumer*>(completionId);
+                auto pConsumer = reinterpret_cast<Core::IIOConsumer*>(completionId);
                 if (pConsumer)
                 {
                     pConsumer->OnIOCompleted(bResult == TRUE, bytesTransferred, pOverlapped);

@@ -3,14 +3,16 @@
 #include <WinSock2.h>
 #include <MSWSock.h>
 
-export module networks.socket;
+export module networks.core.socket;
 
 import std;
 
 
-namespace LibNetworks
+namespace LibNetworks::Core
 {
-class Socket
+
+
+export class Socket
 {
 public:
 
@@ -61,4 +63,4 @@ private:
 };
 
 
-} // namespace LibNetworks
+} // namespace LibNetworks::Core

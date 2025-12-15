@@ -6,11 +6,11 @@
 #include <spdlog/spdlog.h>
 #pragma comment(lib, "ws2_32.lib")
 
-module networks.socket;
+module networks.core.socket;
 
 import commons.logger;
 
-namespace LibNetworks
+namespace LibNetworks::Core
 {
 
 
@@ -38,7 +38,7 @@ bool Socket::CreateSocketAddress(sockaddr_in& rfSockAddr, const std::string ip, 
     rfSockAddr.sin_port = port == 0 ? 0 : htons(port);
     if (inet_pton(AF_INET, ip.c_str(), &rfSockAddr.sin_addr) <= 0)
     {
-        //LibCommons::Logger::GetInstance().LogError("Socket", "CreateSocketAddress, Invalid IP Address : {}", ip);
+        LibCommons::Logger::GetInstance().LogError("Socket", "CreateSocketAddress, Invalid IP Address : {}", ip);
 
         return false;
     }
@@ -61,14 +61,14 @@ void Socket::CreateSocket()
     m_Socket = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
     if (INVALID_SOCKET == m_Socket)
     {
-        //LibCommons::Logger::GetInstance().LogError("Socket", "Socket Create failed. Last Error : {}", ::GetLastError());
+        LibCommons::Logger::GetInstance().LogError("Socket", "Socket Create failed. Last Error : {}", ::GetLastError());
 
         Close();
 
         return;
     }
 
-    //LibCommons::Logger::GetInstance().LogError("Socket", "Socket Created.");
+    LibCommons::Logger::GetInstance().LogError("Socket", "Socket Created.");
 }
 
 
@@ -99,7 +99,7 @@ bool Socket::Bind()
 {
     if (SOCKET_ERROR == ::bind(m_Socket, reinterpret_cast<const sockaddr*>(&GetAddress()), sizeof(sockaddr_in)))
     {
-        //LibCommons::Logger::GetInstance().LogError("SocketListener", "Bind failed. Error: {}", ::WSAGetLastError());
+        LibCommons::Logger::GetInstance().LogError("SocketListener", "Bind failed. Error: {}", ::WSAGetLastError());
 
         Close();
 
@@ -113,7 +113,7 @@ bool Socket::Listen(unsigned int maxConnectionCount)
 {
     if (SOCKET_ERROR == ::listen(m_Socket, static_cast<int>(maxConnectionCount)))
     {
-        //LibCommons::Logger::GetInstance().LogError("SocketListener", "Listen failed. Error: {}", ::WSAGetLastError());
+        LibCommons::Logger::GetInstance().LogError("SocketListener", "Listen failed. Error: {}", ::WSAGetLastError());
 
         Close();
 
@@ -123,4 +123,4 @@ bool Socket::Listen(unsigned int maxConnectionCount)
 }
 
 
-} // namespace LibNetworks
+} // namespace LibNetworks::Core

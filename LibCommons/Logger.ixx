@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <memory>
 #include <string>
@@ -75,7 +75,7 @@ protected:
             pLogger->log(lvl, spdlog::fmt_lib::runtime(fmt), args...);
         }
 
-        auto pConsoleLogger = m_pConsoleLogger;
+        auto & pConsoleLogger = m_pConsoleLogger;
         if (pConsoleLogger)
         {
             pConsoleLogger->log(lvl, spdlog::fmt_lib::runtime(fmt), std::forward<Args>(args)...);
