@@ -13,13 +13,16 @@ namespace LibNetworks::Sessions
 
 export class IOSession : public Core::IIOConsumer, public std::enable_shared_from_this<IOSession>
 {
+public:
     IOSession() = delete;
+    IOSession(const IOSession&) = delete;
+    IOSession& operator=(const IOSession&) = delete;
+
     explicit IOSession(const std::shared_ptr<Core::Socket>& pSocket);
 
     virtual ~IOSession() = default;
 
-    IOSession(const IOSession&) = delete;
-    IOSession& operator=(const IOSession&) = delete;
+
 
     const uint64_t GetSessionId() const { return m_SessionId; }
 
