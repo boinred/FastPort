@@ -43,7 +43,7 @@ private:
 
     uint64_t m_SessionId = m_NextSessionId.fetch_add(1, std::memory_order_relaxed);
 
-    inline static std::atomic<uint64_t> m_NextSessionId;
+    inline static std::atomic<uint64_t> m_NextSessionId = 1;
 
 };
 
