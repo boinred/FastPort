@@ -22,9 +22,9 @@ public:
 
     void Wait();
 
-    bool Associate(SOCKET& rfSocket, ULONG_PTR completionId);
+    bool Associate(SOCKET& rfSocket, ULONG_PTR completionId) const;
 
-    bool Post(ULONG_PTR uCompletionKey, DWORD bytes = 0, OVERLAPPED* ov = nullptr);
+    bool Post(ULONG_PTR uCompletionKey, DWORD bytes = 0, OVERLAPPED* ov = nullptr) const;
 
 private:
     bool CreateCompletionPort();

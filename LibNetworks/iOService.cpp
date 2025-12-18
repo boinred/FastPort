@@ -135,7 +135,7 @@ void IOService::Wait()
     LibCommons::Logger::GetInstance().LogInfo("IOService", "Service wait completed.");
 }
 
-bool IOService::Associate(SOCKET& rfSocket, ULONG_PTR completionId)
+bool IOService::Associate(SOCKET& rfSocket, ULONG_PTR completionId) const
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
@@ -158,7 +158,7 @@ bool IOService::Associate(SOCKET& rfSocket, ULONG_PTR completionId)
     return true;
 }
 
-bool IOService::Post(ULONG_PTR uCompletionKey, DWORD bytes, OVERLAPPED* ov)
+bool IOService::Post(ULONG_PTR uCompletionKey, DWORD bytes, OVERLAPPED* ov) const
 {
     if (!::PostQueuedCompletionStatus(m_hICOP, bytes, uCompletionKey, ov))
     {
