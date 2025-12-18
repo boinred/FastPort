@@ -51,7 +51,7 @@ private:
 
     bool m_bConnected = false;
 
-    Socket m_Socket = {};
+    std::shared_ptr<Socket> m_pSocket = std::make_shared<Socket>();
 
     std::shared_ptr<Services::IOService> m_pIOService = {};
 
