@@ -133,6 +133,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FastPortClient.cpp" />
+    <ClCompile Include="FastPortOutboundSession.cpp" />
+    <ClCompile Include="FastPortOutboundSession.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">

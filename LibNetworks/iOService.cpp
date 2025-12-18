@@ -36,7 +36,7 @@ bool IOService::Start(unsigned int numThreads)
         return false;
     }
 
-    m_bTerminated.store(false, std::memory_order_acquire);
+    m_bTerminated.store(false, std::memory_order_release);
 
     auto fDoWorker = [this, &logger]()
         {

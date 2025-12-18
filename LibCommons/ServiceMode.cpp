@@ -83,9 +83,10 @@ bool ServiceMode::Installer::Install(LPCWSTR ServiceName, LPCWSTR DisplayName, D
 
 bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 {
+    auto& logger = LibCommons::Logger::GetInstance();
+
     ULONG64 dwStartTime = ::GetTickCount64();
     DWORD dwBytesNeeded = 0;
-
 
     // Get a handle to the SCM database. 
     SC_HANDLE hManager = OpenSCManager(
@@ -95,7 +96,7 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
     if (nullptr == hManager)
     {
-         LibCommons::Logger::GetInstance().LogError("ServiceMode", "Stop, SCManager open is failed. Error : {}", ::GetLastError());
+        logger.LogError("ServiceMode", "Stop, SCManager open is failed. Error : {}", ::GetLastError());
         return false;
     }
 
@@ -110,7 +111,7 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
     if (hService == nullptr)
     {
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Stop, Service is not stopped. Service Name : {}, Error : {}", StrConverter::ToAnsi(ServiceName), ::GetLastError());
+        logger.LogError("ServiceMode", "Stop, Service is not stopped. Service Name : {}, Error : {}", StrConverter::ToAnsi(ServiceName), ::GetLastError());
 
         ::CloseServiceHandle(hManager);
 
@@ -126,7 +127,7 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
         // Make sure the service is not already stopped.
         if (!QueryServiceStatusEx(hService, SC_STATUS_PROCESS_INFO, (LPBYTE)&ssp, sizeof(SERVICE_STATUS_PROCESS), &dwBytesNeeded))
         {
-            // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Stop, QueryServiceStatusEx. Service Name : {}, Error : {}", StrConverter::ToAnsi(ServiceName), ::GetLastError());
+            logger.LogError("ServiceMode", "Stop, QueryServiceStatusEx. Service Name : {}, Error : {}", StrConverter::ToAnsi(ServiceName), ::GetLastError());
 
             ::CloseServiceHandle(hManager);
             ::CloseServiceHandle(hService);
@@ -149,7 +150,7 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
         if (ssp.dwCurrentState == SERVICE_STOPPED)
         {
-            // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Stop, Service is already stopped. Service Name : {}", StrConverter::ToAnsi(ServiceName));
+            logger.LogError("ServiceMode", "Stop, Service is already stopped. Service Name : {}", StrConverter::ToAnsi(ServiceName));
 
             ::CloseServiceHandle(hManager);
             ::CloseServiceHandle(hService);
@@ -161,7 +162,7 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
         {
             if (::GetTickCount64() - dwStartTime > dwTimeout)
             {
-                // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Stop, Service stop timed out. Service Name : {}", StrConverter::ToAnsi(ServiceName));
+                logger.LogError("ServiceMode", "Stop, Service stop timed out. Service Name : {}", StrConverter::ToAnsi(ServiceName));
                 ::CloseServiceHandle(hManager);
                 ::CloseServiceHandle(hService);
 
@@ -181,11 +182,11 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
     if (!ControlService(hService, SERVICE_CONTROL_STOP, (LPSERVICE_STATUS)&ssp))
     {
-        /*LibCommons::Logger::GetInstance().LogError(
+        logger.LogError(
             "ServiceMode",
             "Stop, ControlService is not success. Service Name : {}, Error : {}",
             StrConverter::ToAnsi(ServiceName),
-            ::GetLastError());*/
+            ::GetLastError());
 
         ::CloseServiceHandle(hManager);
         ::CloseServiceHandle(hService);
@@ -201,11 +202,11 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
         if (!QueryServiceStatusEx(hService, SC_STATUS_PROCESS_INFO, (LPBYTE)&ssp, sizeof(SERVICE_STATUS_PROCESS), &dwBytesNeeded))
         {
-            /*LibCommons::Logger::GetInstance().LogError(
+            logger.LogError(
                 "ServiceMode",
                 "Stop, QueryServiceStatusEx. Service Name : {}, Error : {}",
                 StrConverter::ToAnsi(ServiceName),
-                ::GetLastError());*/
+                ::GetLastError());
 
             ::CloseServiceHandle(hManager);
             ::CloseServiceHandle(hService);
@@ -218,10 +219,10 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
         if (GetTickCount64() - dwStartTime > dwTimeout)
         {
-            /*LibCommons::Logger::GetInstance().LogError(
+            logger.LogError(
                 "ServiceMode",
                 "Stop, Service stop timed out. Service Name : {}",
-                StrConverter::ToAnsi(ServiceName));*/
+                StrConverter::ToAnsi(ServiceName));
 
             ::CloseServiceHandle(hManager);
             ::CloseServiceHandle(hService);
@@ -230,10 +231,10 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
         }
     }
 
-    /*LibCommons::Logger::GetInstance().LogInfo(
+    logger.LogInfo(
         "ServiceMode",
         "Stop, Service is stopped. Service Name : {}",
-        StrConverter::ToAnsi(ServiceName));*/
+        StrConverter::ToAnsi(ServiceName));
 
     ::CloseServiceHandle(hManager);
     ::CloseServiceHandle(hService);
@@ -242,11 +243,12 @@ bool ServiceMode::Installer::Stop(LPCWSTR ServiceName)
 
 bool ServiceMode::Installer::UnInstall(LPCWSTR ServiceName)
 {
+    auto& logger = LibCommons::Logger::GetInstance();
     SC_HANDLE hManager = ::OpenSCManager(nullptr, nullptr, SC_MANAGER_CONNECT);
     assert(nullptr != hManager);
     if (nullptr == hManager)
     {
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "UnInstall, SCManager open is failed. Error : {}", ::GetLastError());
+        logger.LogError("ServiceMode", "UnInstall, SCManager open is failed. Error : {}", ::GetLastError());
 
         return false;
     }
@@ -254,7 +256,7 @@ bool ServiceMode::Installer::UnInstall(LPCWSTR ServiceName)
     SC_HANDLE hService = ::OpenService(hManager, ServiceName, SERVICE_STOP | SERVICE_QUERY_STATUS | DELETE);
     if (nullptr == hService)
     {
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "UnInstall, Service is not found. Service Name : {}", StrConverter::ToAnsi(ServiceName));
+        logger.LogError("ServiceMode", "UnInstall, Service is not found. Service Name : {}", StrConverter::ToAnsi(ServiceName));
 
         return true;
     }
@@ -271,7 +273,7 @@ bool ServiceMode::Installer::UnInstall(LPCWSTR ServiceName)
         if (ss.dwCurrentState == SERVICE_STOP_PENDING)
         {
             countOfTryTo++;
-            // LibCommons::Logger::GetInstance().LogWarning("ServiceMode", "Service stop is pending, Service Name : {}", StrConverter::ToAnsi(ServiceName));
+            logger.LogWarning("ServiceMode", "Service stop is pending, Service Name : {}", StrConverter::ToAnsi(ServiceName));
 
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
@@ -283,22 +285,22 @@ bool ServiceMode::Installer::UnInstall(LPCWSTR ServiceName)
 
     if (ss.dwCurrentState == SERVICE_STOPPED)
     {
-        // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service is stopped, Service Name : {}", StrConverter::ToAnsi(ServiceName));
+        logger.LogInfo("ServiceMode", "Service is stopped, Service Name : {}", StrConverter::ToAnsi(ServiceName));
     }
     else
     {
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Service is stopp failed, Service Name : {}", StrConverter::ToAnsi(ServiceName));
+        logger.LogError("ServiceMode", "Service is stopp failed, Service Name : {}", StrConverter::ToAnsi(ServiceName));
     }
 
     if (!::DeleteService(hService))
     {
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Service is delete failed, Service Name : {}, Error Code : {}", StrConverter::ToAnsi(ServiceName), ::GetLastError());
+        logger.LogError("ServiceMode", "Service is delete failed, Service Name : {}, Error Code : {}", StrConverter::ToAnsi(ServiceName), ::GetLastError());
 
         return false;
     }
 
 
-    // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service is delete success. Service Name : {}", StrConverter::ToAnsi(ServiceName));
+    logger.LogInfo("ServiceMode", "Service is delete success. Service Name : {}", StrConverter::ToAnsi(ServiceName));
 
     return true;
 }
@@ -342,6 +344,8 @@ ServiceMode::ServiceMode(const bool bCanStop /*= true*/, const bool bCanShutdown
 
 bool ServiceMode::Execute(const DWORD argc, const char* argv[])
 {
+    auto& logger = LibCommons::Logger::GetInstance();
+
     cxxopts::Options options(m_ServiceName, "Allowed options.");
 
     options.add_options()
@@ -363,12 +367,12 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
         bool bSuccess = Installer::Install(GetServiceName().c_str(), GetDisplayName().c_str(), GetStartType(), GetDependencies().c_str(), GetAccount().c_str(), GetPassword().c_str());
         if (bSuccess)
         {
-            // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service is installed. ServiceName : {}, ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
+            logger.LogInfo("ServiceMode", "Service is installed. ServiceName : {}, ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
             WriteEventLogEntry(std::format(L"{} is installed.", GetServiceName()), EVENTLOG_INFORMATION_TYPE);
         }
         else
         {
-            // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Service is not installed. ServiceName : {}, ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
+            logger.LogError("ServiceMode", "Service is not installed. ServiceName : {}, ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
             WriteEventLogEntry(L"Columbus service is install failed.", EVENTLOG_ERROR_TYPE);
         }
 
@@ -378,7 +382,7 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
         bool bSuccess = Installer::UnInstall(GetServiceName().c_str());
         if (bSuccess)
         {
-            // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "{} is uninstalled. ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
+            logger.LogInfo("ServiceMode", "Service is uninstalled. ServiceName : {}, ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
 
             std::cout << GetServiceNameAnsi() << " is uninstalled." << std::endl;
 
@@ -386,7 +390,7 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
         }
         else
         {
-            // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "{} is not uninstalled. ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
+            logger.LogError("ServiceMode", "Service is not uninstalled. ServiceName : {}, ServiceVersion : {}", GetServiceNameAnsi(), FileVersion());
 
             std::cout << GetServiceNameAnsi() << " is not uninstalled." << std::endl;
 
@@ -398,7 +402,7 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
         bool bSuccess = Installer::Stop(GetServiceName().c_str());
         if (bSuccess)
         {
-            // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "{} is stopped.", GetServiceNameAnsi());
+            logger.LogInfo("ServiceMode", "{} is stopped.", GetServiceNameAnsi());
 
             std::cout << "service is stop." << std::endl;
 
@@ -406,7 +410,7 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
         }
         else
         {
-            // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "{} is not stopped.", GetServiceNameAnsi());
+            logger.LogError("ServiceMode", "{} is not stopped.", GetServiceNameAnsi());
 
             std::cout << "service is not stop." << std::endl;
             WriteEventLogEntry(std::format(L"Service is stop. ServiceName : {}", GetServiceName()), EVENTLOG_ERROR_TYPE);
@@ -416,11 +420,11 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
     bool bSuccess = ServiceMode::Run(std::dynamic_pointer_cast<ServiceMode>(shared_from_this()));
     if (bSuccess)
     {
-        // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service running success. Service Name : {}, Version : {}", GetServiceNameAnsi(), FileVersion());
+        logger.LogInfo("ServiceMode", "Service running success. Service Name : {}, Version : {}", GetServiceNameAnsi(), FileVersion());
     }
     else
     {
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "Service run is failed. Service Name : {}, Version : {}", GetServiceNameAnsi(), FileVersion());
+        logger.LogError("ServiceMode", "Service run is failed. Service Name : {}, Version : {}", GetServiceNameAnsi(), FileVersion());
     }
 
 
@@ -430,9 +434,10 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
 
 bool ServiceMode::Run(std::shared_ptr<ServiceMode> pService)
 {
+    auto& logger = LibCommons::Logger::GetInstance();
     m_pServiceMode = pService;
 
-    // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "ServiceName : {}, Version : {}, Request Run.", m_pServiceMode->GetServiceNameAnsi(), m_pServiceMode->FileVersion());
+    logger.LogInfo("ServiceMode", "ServiceName : {}, Version : {}, Request Run.", m_pServiceMode->GetServiceNameAnsi(), m_pServiceMode->FileVersion());
 
     bool bSuccess = false;
 #if _DEBUG
@@ -449,11 +454,11 @@ bool ServiceMode::Run(std::shared_ptr<ServiceMode> pService)
     {
         m_pServiceMode->WriteEventLogEntry(StrConverter::ToUnicode(std::format("Service Mode is Started failed, Version : {}, Error : {}", m_pServiceMode->FileVersion(), ::GetLastError())), EVENTLOG_INFORMATION_TYPE);
 
-        // LibCommons::Logger::GetInstance().LogError("ServiceMode", "StartServiceCtrlDispatcher is error. ServiceName : {}, Error : {}", m_pServiceMode->GetServiceNameAnsi(), ::GetLastError());
+        logger.LogError("ServiceMode", "StartServiceCtrlDispatcher is error. ServiceName : {}, Error : {}", m_pServiceMode->GetServiceNameAnsi(), ::GetLastError());
     }
     else
     {
-        // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "StartServiceCtrlDispatcher is success. ServiceName : {}", m_pServiceMode->GetServiceNameAnsi());
+        logger.LogInfo("ServiceMode", "StartServiceCtrlDispatcher is success. ServiceName : {}", m_pServiceMode->GetServiceNameAnsi());
 
         m_pServiceMode->WriteEventLogEntry(StrConverter::ToUnicode(std::format("Service Mode is Started, Version : {}", m_pServiceMode->FileVersion())), EVENTLOG_INFORMATION_TYPE);
     }
@@ -474,7 +479,7 @@ void ServiceMode::Wait()
 
 void WINAPI ServiceMode::ServiceMain(DWORD argc, TCHAR* argv[])
 {
-    // LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service Name : {}, ServiceMain function.", m_pServiceMode->GetServiceNameAnsi());
+     LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service Name : {}, ServiceMain function.", m_pServiceMode->GetServiceNameAnsi());
 
     m_pServiceMode->m_StatusHandle = ::RegisterServiceCtrlHandler(m_pServiceMode->GetServiceName().c_str(), ServiceCtrlHandler);
     if (nullptr == m_pServiceMode->m_StatusHandle)

@@ -3,7 +3,6 @@
 #include <memory>
 #include <string>
 #include <unordered_set>
-#include <format>
 
 #include <spdlog/logger.h>
 #include <spdlog/common.h>

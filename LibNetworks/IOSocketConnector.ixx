@@ -20,7 +20,7 @@ import networks.services.io_service;
 namespace LibNetworks::Core
 {
 
-class IOSocketConnector : public IIOConsumer, public std::enable_shared_from_this<IOSocketConnector>
+export class IOSocketConnector : public IIOConsumer, public std::enable_shared_from_this<IOSocketConnector>
 {
 public:
     using OnDoFuncCreateSession = std::function<std::shared_ptr<Sessions::OutboundSession>(const std::shared_ptr<Core::Socket>&)>;

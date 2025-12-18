@@ -79,7 +79,7 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
             // 문제.
         }
         else
-        {          
+        {
             std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(std::make_shared<Socket>(pAcceptOverlapped->AcceptSocket));
 
             // TODO: 여기서 새로운 세션을 생성하거나 연결을 처리해야 합니다.
@@ -105,7 +105,41 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
 
 bool IOSocketListener::Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount)
 {
-    return false;
+    auto& logger = LibCommons::Logger::GetInstance();
+    // 1. IOService 시작
+    if (!m_IOService.Start(threadCount))
+    {
+        logger.LogError("SocketListener", "IOService Start failed");
+        Shutdown();
+
+        return false;
+    }
+
+    // 1. Listener를 위한 Socket 생성.
+    if (!ListenSocket(listenPort, maxConnectionCount))
+    {
+        logger.LogError("SocketListener", "ListenSocket is not valid.");
+
+        Shutdown();
+
+        return false;
+    }
+
+    m_bExecuted = true;
+
+    // 3. 초기 AcceptEx 요청 시작
+    for (int i = 0; i < beginAcceptCount; i++)
+    {
+        if (!BeginAcceptEx())
+        {
+            logger.LogWarning("SocketListener", "Faile to post initial accept : {}", i);
+        }
+
+    }
+
+    logger.LogInfo("SocketListener", "Started listening on port {} with {} threads.", listenPort, threadCount);
+
+    return true;
 }
 
 bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount)
@@ -158,7 +192,7 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     if (SOCKET_ERROR == ::WSAIoctl(m_ListenerSocket.GetSocket(), SIO_GET_EXTENSION_FUNCTION_POINTER, &guidAcceptEx, sizeof(guidAcceptEx), &m_lpfnAcceptEx, sizeof(m_lpfnAcceptEx), &dwBytes, nullptr, nullptr))
     {
         logger.LogError("SocketListener", "Failed to get AcceptEx function. Error: {}", ::WSAGetLastError());
-        
+
         Shutdown();
 
         return false;

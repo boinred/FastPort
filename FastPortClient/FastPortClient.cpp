@@ -8,32 +8,60 @@
 
 import commons.rwlock;
 import commons.logger;
+import networks.core.socket;
 import networks.services.io_service;
+import networks.core.io_socket_connector;
+import networks.sessions.outbound_session;
+import fastport_outbound_session;
+
 int main()
 {
-	std::string location;
+    std::string location;
 
-	LibNetworks::Services::IOService ioService;
+    bool bServiceMode = true;
+    //#if _DEBUG
+    location = std::filesystem::current_path().string();
+    bServiceMode = false;
+    //#endif // #if _DEBUG
 
-	bool bServiceMode = true;
-	//#if _DEBUG
-	location = std::filesystem::current_path().string();
-	bServiceMode = false;
-	//#endif // #if _DEBUG
+    std::time_t t = std::time(nullptr);
 
-	std::time_t t = std::time(nullptr);
+    std::tm now{};
+    localtime_s(&now, &t);
 
-	std::tm now{};
-	localtime_s(&now, &t);
+    std::string fileName = std::format("log_{:04}_{:02}_{:02}_{:02}_{:02}.txt", now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour, now.tm_min);
 
-	std::string fileName = std::format("log_{:04}_{:02}_{:02}_{:02}_{:02}.txt", now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour, now.tm_min);
+    auto& logger = LibCommons::Logger::GetInstance();
+    // Create Logger 
+    logger.Create(location + "/" + "loggers", fileName, 1024 * 1024 * 10, 3, bServiceMode);
 
-	// Create Logger 
-	LibCommons::Logger::GetInstance().Create(location + "/" + "loggers", fileName, 1024 * 1024 * 10, 3, bServiceMode);
+    LibNetworks::Core::Socket::Initialize();
 
-	LibCommons::Logger::GetInstance().LogInfo("FastPortClient", "Test logger.");
+    auto pIOService = std::make_shared<LibNetworks::Services::IOService>();
+    pIOService->Start(std::thread::hardware_concurrency() * 2);
 
-	//spdlog::info("Hello, {}!", "world");
+    std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> connectors;
+
+    auto pOnFuncCreateSession = [](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::OutboundSession>
+        {
+            return std::make_shared<FastPortOutboundSession>(pSocket);
+        };
+
+    for (int i = 0; i < 1; i++)
+    {
+        auto pConnector = LibNetworks::Core::IOSocketConnector::Create(pIOService, pOnFuncCreateSession, "127.0.0.1", 6628);
+        if (pConnector)
+        {
+            connectors.push_back(pConnector);
+        }
+    }
+
+
+    logger.LogInfo("Main", "FastPortClient Started. V : {}", "Started.");
+
+    pIOService->Wait();
+
+    logger.LogInfo("Main", "FastPortClient Started. V : {}", "Closed.");
 }
 
 // 프로그램 실행: <Ctrl+F5> 또는 [디버그] > [디버깅하지 않고 시작] 메뉴
