@@ -60,12 +60,7 @@ void IOSocketConnector::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVE
 
     m_bConnected = true;
 
-    // TODO: 연결 성공 후 작업 처리
-    for (int i = 0; i < 10; i++)
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(60 * i));
-    }
-
+ 
     delete pOverlapped;
 }
 

@@ -68,7 +68,7 @@ void Socket::CreateSocket()
         return;
     }
 
-    LibCommons::Logger::GetInstance().LogError("Socket", "Socket Created.");
+    LibCommons::Logger::GetInstance().LogInfo("Socket", "Socket Created.");
 }
 
 

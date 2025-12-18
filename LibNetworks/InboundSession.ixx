@@ -21,8 +21,6 @@ public:
 
     explicit InboundSession(const std::shared_ptr<Core::Socket>& pSocket);
 
-private:
-
     void OnAccepted() override;
 
     void OnDisconnected() override;

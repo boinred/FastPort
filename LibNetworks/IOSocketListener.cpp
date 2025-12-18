@@ -82,10 +82,9 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
         {
             std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(std::make_shared<Socket>(pAcceptOverlapped->AcceptSocket));
 
-            // TODO: 여기서 새로운 세션을 생성하거나 연결을 처리해야 합니다.
-            // 예: pListerner->OnAccept(pAcceptOverlapped->AcceptSocket);
+            pInboundSession->OnAccepted();
 
-            // 테스트를 위해 일단 닫습니다. (메모리 누수 방지
+            // 컨테이너에 저장.
         }
     }
 

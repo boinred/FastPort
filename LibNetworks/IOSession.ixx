@@ -22,8 +22,6 @@ public:
 
     virtual ~IOSession() = default;
 
-
-
     const uint64_t GetSessionId() const { return m_SessionId; }
 
     virtual void OnAccepted() {}

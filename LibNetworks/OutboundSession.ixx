@@ -20,7 +20,6 @@ public:
 
     explicit OutboundSession(const std::shared_ptr<Core::Socket>& pSocket);
 
-private:
     void OnConnected() override;
 
     void OnDisconnected() override;

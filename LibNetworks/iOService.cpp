@@ -93,7 +93,7 @@ bool IOService::Start(unsigned int numThreads)
         m_Workers.emplace_back(fDoWorker);
     }
 
-    return false;
+    return true; 
 }
 
 void IOService::Stop()
