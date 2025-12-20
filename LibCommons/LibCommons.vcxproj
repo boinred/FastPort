@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CircleBufferQueue.ixx" />
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="Logger.ixx" />
     <ClCompile Include="RWLock.cpp" />

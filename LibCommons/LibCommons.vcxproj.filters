@@ -9,5 +9,13 @@
     <ClCompile Include="ServiceMode.cpp" />
     <ClCompile Include="Logger.cpp" />
     <ClCompile Include="RWLock.cpp" />
+    <ClCompile Include="CircleBufferQueue.ixx">
+      <Filter>Buffers</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Buffers">
+      <UniqueIdentifier>{26dfa8c2-b1d9-45e8-8e1a-601fc1d3ec56}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

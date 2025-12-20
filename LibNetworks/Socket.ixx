@@ -57,6 +57,7 @@ public:
     // 연결 수신 대기 상태 전환
     bool Listen(unsigned int maxConnectionCount);
 
+
     // 소켓 주소 구조체 반환
     const sockaddr_in& GetAddress() const { return m_SockAddr; }
     sockaddr_in& GetAddress()
