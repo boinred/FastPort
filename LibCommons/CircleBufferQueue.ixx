@@ -1,13 +1,13 @@
 ﻿module;
 
 #include <vector>
-#include <mutex>
 #include <algorithm>
 #include <cstring>
 
 export module commons.buffers.circle_buffer_queue;
 
 import std;
+import commons.rwlock;
 
 namespace LibCommons::Buffers
 {
@@ -30,16 +30,16 @@ public:
     CircleBufferQueue& operator=(const CircleBufferQueue&) = delete;
 
     // 버퍼에 데이터를 씁니다.
-    bool Push(const void* data, size_t size)
+    bool Write(const void* pData, size_t size)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
 
         if (m_Capacity - m_Size < size)
         {
             return false;
         }
 
-        const char* byteData = static_cast<const char*>(data);
+        const char* byteData = static_cast<const char*>(pData);
         size_t writeIndex = m_Head;
         size_t firstPart = std::min(size, m_Capacity - writeIndex);
 
@@ -59,7 +59,7 @@ public:
     // 버퍼에서 데이터를 읽고 제거합니다.
     bool Pop(void* outBuffer, size_t size)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
 
         if (m_Size < size)
         {
@@ -86,7 +86,7 @@ public:
     // 버퍼에서 데이터를 읽기만 하고 제거하지 않습니다.
     bool Peek(void* outBuffer, size_t size)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        auto lock = LibCommons::ReadLockBlock(m_RWLock);
 
         if (m_Size < size)
         {
@@ -110,37 +110,40 @@ public:
     // 버퍼에서 데이터를 제거합니다.
     bool Consume(size_t size)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-
-        if (m_Size < size)
+        if (auto lock = LibCommons::WriteLockBlock(m_RWLock))
         {
-            return false;
+            if (m_Size < size)
+            {
+                return false;
+            }
+
+            m_Tail = (m_Tail + size) % m_Capacity;
+            m_Size -= size;
+
+            return true;
         }
-
-        m_Tail = (m_Tail + size) % m_Capacity;
-        m_Size -= size;
-
-        return true;
     }
 
-    size_t GetUsedSize() const
+    size_t CanReadSize() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        auto lock = LibCommons::ReadLockBlock(m_RWLock);
         return m_Size;
     }
 
-    size_t GetFreeSize() const
+    size_t CanWriteSize() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
+        auto lock = LibCommons::ReadLockBlock(m_RWLock);
         return m_Capacity - m_Size;
     }
 
     void Clear()
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_Head = 0;
-        m_Tail = 0;
-        m_Size = 0;
+        if (auto lock = LibCommons::WriteLockBlock(m_RWLock))
+        {
+            m_Head = 0;
+            m_Tail = 0;
+            m_Size = 0;
+        }
     }
 
 private:
@@ -149,7 +152,7 @@ private:
     size_t m_Tail = 0;
     size_t m_Size = 0;
     size_t m_Capacity = 0;
-    mutable std::mutex m_Mutex;
+    mutable LibCommons::RWLock m_RWLock;
 };
 
 } // namespace LibCommons::Buffers
