@@ -35,7 +35,7 @@ IOSocketListener::IOSocketListener(Core::Socket& rfListenerSocket, OnDoFuncCreat
 void IOSocketListener::Shutdown()
 {
     m_bExecuted = false;
-    m_IOService.Stop();
+    m_pIOService->Stop();
     m_ListenerSocket.Close();
 }
 
@@ -106,7 +106,7 @@ bool IOSocketListener::Start(const unsigned short listenPort, const unsigned lon
 {
     auto& logger = LibCommons::Logger::GetInstance();
     // 1. IOService 시작
-    if (!m_IOService.Start(threadCount))
+    if (!m_pIOService->Start(threadCount))
     {
         logger.LogError("SocketListener", "IOService Start failed");
         Shutdown();
@@ -167,7 +167,7 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     }
 
     // 4. IOCP에 소켓 연결
-    if (!m_IOService.Associate(m_ListenerSocket.GetSocket(), GetCompletionId()))
+    if (!m_pIOService->Associate(m_ListenerSocket.GetSocket(), GetCompletionId()))
     {
         logger.LogError("SocketListener", "failed to associate listen socket.");
 

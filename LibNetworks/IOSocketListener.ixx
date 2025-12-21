@@ -52,7 +52,7 @@ private:
 
 private:
     Core::Socket m_ListenerSocket = {};
-    Services::IOService m_IOService = {};
+    std::shared_ptr<Services::IOService> m_pIOService = std::make_shared<Services::IOService>();
 
     bool m_bExecuted = {};
 

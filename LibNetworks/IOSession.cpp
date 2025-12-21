@@ -12,5 +12,9 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket) : m_pSocket(s
 
 }
 
+void IOSession::RequestReceived()
+{
+    
+}
 
 } // namespace LibNetworks::Sessions

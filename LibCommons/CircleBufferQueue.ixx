@@ -119,9 +119,9 @@ public:
 
             m_Tail = (m_Tail + size) % m_Capacity;
             m_Size -= size;
-
-            return true;
         }
+
+        return true;
     }
 
     size_t CanReadSize() const

@@ -32,6 +32,10 @@ public:
     virtual void OnReceive(const char* pData, size_t dataLength) {}
     virtual void OnSent(size_t bytesSent) {}
 
+    void SendBuffer(const char* pData, size_t dataLength);
+protected:
+    void RequestReceived();
+
 protected:
     const std::shared_ptr<Core::Socket> GetSocket() const { return m_pSocket; }
 
