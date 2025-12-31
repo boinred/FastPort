@@ -21,7 +21,8 @@ OutboundSession::OutboundSession(const std::shared_ptr<Core::Socket>& pSocket,
 void OutboundSession::OnConnected()
 {
     LibCommons::Logger::GetInstance().LogInfo("OutboundSession", "OnConnected. Session Id : {}", GetSessionId());
-    //throw std::logic_error("The method or operation is not implemented.");
+    
+    RequestReceived();
 }
 
 void OutboundSession::OnDisconnected()

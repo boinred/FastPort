@@ -19,6 +19,8 @@ InboundSession::InboundSession(const std::shared_ptr<Core::Socket>& pSocket,
 void InboundSession::OnAccepted()
 {
     LibCommons::Logger::GetInstance().LogInfo("InboundSession", "OnAccepted. Session Id : {}", GetSessionId());
+
+    RequestReceived();
 }
 
 void InboundSession::OnDisconnected()

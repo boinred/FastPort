@@ -12,10 +12,10 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer)
     : m_pReceiveBuffer(std::move(pReceiveBuffer)),
-    m_pSendBuffer(std::move(pSendBuffer)),
-    m_pSocket(std::move(pSocket))
+      m_pSendBuffer(std::move(pSendBuffer)),
+      m_pSocket(std::move(pSocket))
 {
-
+    
 }
 
 void IOSession::SendBuffer(const char* pData, size_t dataLength)
@@ -30,18 +30,23 @@ void IOSession::SendBuffer(const char* pData, size_t dataLength)
         return;
     }
 
-    (void)TryPostSendFromQueue();
+    TryPostSendFromQueue();
 }
 
 void IOSession::RequestReceived()
 {
-    (void)PostRecv();
+    PostRecv();
 }
 
 bool IOSession::PostRecv()
 {
-    auto pOverlapped = new OverlappedEx{};
-    pOverlapped->Type = IOType::Recv;
+    bool expected = false;
+    if (!m_RecvInProgress.compare_exchange_strong(expected, true))
+    {
+        return true;
+    }
+
+    m_RecvOverlapped.ResetOverlapped();
 
     WSABUF wsaBuf{};
     wsaBuf.buf = m_RecvTempBuffer.data();
@@ -56,7 +61,7 @@ bool IOSession::PostRecv()
         1,
         &bytes,
         &flags,
-        &pOverlapped->Overlapped,
+        &m_RecvOverlapped.Overlapped,
         nullptr);
 
     if (result == SOCKET_ERROR)
@@ -64,7 +69,7 @@ bool IOSession::PostRecv()
         int err = ::WSAGetLastError();
         if (err != WSA_IO_PENDING)
         {
-            delete pOverlapped;
+            m_RecvInProgress.store(false);
             return false;
         }
     }
@@ -81,9 +86,6 @@ bool IOSession::TryPostSendFromQueue()
         return true;
     }
 
-    std::unique_ptr<OverlappedEx> pOverlapped(new OverlappedEx{});
-    pOverlapped->Type = IOType::Send;
-
     if (!m_pSendBuffer || m_pSendBuffer->CanReadSize() == 0)
     {
         m_SendInProgress.store(false);
@@ -91,22 +93,23 @@ bool IOSession::TryPostSendFromQueue()
     }
 
     const size_t bytesToSend = std::min<size_t>(m_pSendBuffer->CanReadSize(), 64 * 1024);
-    pOverlapped->SendBuffer.resize(bytesToSend);
 
-    if (!m_pSendBuffer->Peek(pOverlapped->SendBuffer.data(), bytesToSend))
+    m_SendOverlapped.SendBuffer.resize(bytesToSend);
+
+    if (!m_pSendBuffer->Peek(m_SendOverlapped.SendBuffer.data(), bytesToSend))
     {
         m_SendInProgress.store(false);
         return false;
     }
 
-    pOverlapped->RequestedBytes = bytesToSend;
+    m_SendOverlapped.RequestedBytes = bytesToSend;
+    m_SendOverlapped.ResetOverlapped();
 
     WSABUF wsaBuf{};
-    wsaBuf.buf = pOverlapped->SendBuffer.data();
-    wsaBuf.len = static_cast<ULONG>(pOverlapped->SendBuffer.size());
+    wsaBuf.buf = m_SendOverlapped.SendBuffer.data();
+    wsaBuf.len = static_cast<ULONG>(m_SendOverlapped.SendBuffer.size());
 
     DWORD bytes = 0;
-    auto raw = pOverlapped.release();
 
     int result = ::WSASend(
         m_pSocket->GetSocket(),
@@ -114,7 +117,7 @@ bool IOSession::TryPostSendFromQueue()
         1,
         &bytes,
         0,
-        &raw->Overlapped,
+        &m_SendOverlapped.Overlapped,
         nullptr);
 
     if (result == SOCKET_ERROR)
@@ -122,7 +125,6 @@ bool IOSession::TryPostSendFromQueue()
         int err = ::WSAGetLastError();
         if (err != WSA_IO_PENDING)
         {
-            delete raw;
             m_SendInProgress.store(false);
             return false;
         }
@@ -133,48 +135,55 @@ bool IOSession::TryPostSendFromQueue()
 
 void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped)
 {
-    auto pOp = reinterpret_cast<OverlappedEx*>(pOverlapped);
-    std::unique_ptr<OverlappedEx> op(pOp);
-
-    if (!op)
+    if (!pOverlapped)
     {
         return;
     }
 
-    if (!bSuccess)
+    // 멤버 Overlapped 주소로 구분
+    if (pOverlapped == &m_RecvOverlapped.Overlapped)
     {
-        if (op->Type == IOType::Send)
+        m_RecvInProgress.store(false);
+
+        if (!bSuccess)
         {
-            m_SendInProgress.store(false);
+            return;
         }
-        return;
-    }
 
-    switch (op->Type)
-    {
-    case IOType::Recv:
         if (bytesTransferred > 0)
         {
             OnReceive(m_RecvTempBuffer.data(), bytesTransferred);
             (void)PostRecv();
         }
-        break;
 
-    case IOType::Send:
+        return;
+    }
+
+    if (pOverlapped == &m_SendOverlapped.Overlapped)
     {
-        
-        m_pSendBuffer->Consume(bytesTransferred);
-        bool hasPending = m_pSendBuffer->CanReadSize() > 0;
-        OnSent(bytesTransferred);
-
         m_SendInProgress.store(false);
+
+        if (!bSuccess)
+        {
+            return;
+        }
+
+        if (m_pSendBuffer)
+        {
+            (void)m_pSendBuffer->Consume(bytesTransferred);
+        }
+
+        const bool hasPending = m_pSendBuffer && (m_pSendBuffer->CanReadSize() > 0);
+
+        OnSent(bytesTransferred);
 
         if (hasPending)
         {
-            TryPostSendFromQueue();
+            (void)TryPostSendFromQueue();
         }
-        break;
+
+        return;
     }
-    }
+}
 
 } // namespace LibNetworks::Sessions
