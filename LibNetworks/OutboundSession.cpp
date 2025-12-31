@@ -9,8 +9,10 @@ namespace LibNetworks::Sessions
 {
 
 
-OutboundSession::OutboundSession(const std::shared_ptr<Core::Socket>& pSocket)
-    : IOSession(std::move(pSocket))
+OutboundSession::OutboundSession(const std::shared_ptr<Core::Socket>& pSocket,
+    std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
+    std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer)
+    : IOSession(std::move(pSocket), std::move(pReceiveBuffer), std::move(pSendBuffer))
 {
 
 }

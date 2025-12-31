@@ -7,7 +7,6 @@ export module networks.sessions.io_session;
 import networks.core.io_consumer;
 import networks.core.socket;
 import commons.buffers.ibuffer;
-import commons.buffers.circle_buffer_queue;
 
 namespace LibNetworks::Sessions
 {
@@ -20,7 +19,9 @@ public:
     IOSession(const IOSession&) = delete;
     IOSession& operator=(const IOSession&) = delete;
 
-    explicit IOSession(const std::shared_ptr<Core::Socket>& pSocket);
+    explicit IOSession(const std::shared_ptr<Core::Socket>& pSocket,
+        std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
+        std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
     virtual ~IOSession() = default;
 
@@ -45,9 +46,8 @@ protected:
     virtual void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override {}
 
 private:
-    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(1024);
-    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(1024);
-
+    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer{};
+    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pSendBuffer{};
 
     std::shared_ptr<Core::Socket> m_pSocket = {};
 

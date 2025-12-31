@@ -5,6 +5,7 @@ export module networks.sessions.inbound_session;
 
 import networks.sessions.io_session;
 import networks.core.socket; 
+import commons.buffers.ibuffer;
 
 namespace LibNetworks::Sessions
 {
@@ -19,7 +20,9 @@ public:
 
     virtual ~InboundSession() = default;
 
-    explicit InboundSession(const std::shared_ptr<Core::Socket>& pSocket);
+    explicit InboundSession(const std::shared_ptr<Core::Socket>& pSocket,
+        std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
+        std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
     void OnAccepted() override;
 

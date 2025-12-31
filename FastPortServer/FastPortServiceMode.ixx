@@ -10,6 +10,7 @@ import std;
 
 import commons.service_mode;
 import commons.logger; 
+import commons.buffers.circle_buffer_queue;
 
 import networks.core.socket; 
 import networks.core.io_socket_listener;
@@ -20,10 +21,7 @@ import fastport_inbound_session;
 export class FastPortServiceMode : public LibCommons::ServiceMode
 {
 public:
-    FastPortServiceMode() : ServiceMode(true, true, false)
-    {
-
-    }
+    FastPortServiceMode() : ServiceMode(true, true, false) { }
 
 protected:
     // ServiceMode을(를) 통해 상속됨
@@ -33,7 +31,9 @@ protected:
 
         auto pOnFuncCreateSession = [](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::InboundSession>
             {
-                return std::make_shared<FastPortInboundSession>(pSocket);
+                auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(64 * 1024);
+                auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(64 * 1024);
+                return std::make_shared<FastPortInboundSession>(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer));
             };
         m_pListener = LibNetworks::Core::IOSocketListener::Create(m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
         m_bRunning = nullptr != m_pListener;

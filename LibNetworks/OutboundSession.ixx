@@ -4,6 +4,7 @@ export module networks.sessions.outbound_session;
 
 import networks.sessions.io_session;
 import networks.core.socket;
+import commons.buffers.ibuffer;
 
 namespace LibNetworks::Sessions
 {
@@ -18,7 +19,9 @@ public:
 
     virtual ~OutboundSession() = default;
 
-    explicit OutboundSession(const std::shared_ptr<Core::Socket>& pSocket);
+    explicit OutboundSession(const std::shared_ptr<Core::Socket>& pSocket,
+        std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
+        std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
     void OnConnected() override;
 
