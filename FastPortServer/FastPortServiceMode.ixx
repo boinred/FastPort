@@ -31,8 +31,8 @@ protected:
 
         auto pOnFuncCreateSession = [](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::InboundSession>
             {
-                auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(64 * 1024);
-                auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(64 * 1024);
+                auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
+                auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
                 return std::make_shared<FastPortInboundSession>(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer));
             };
         m_pListener = LibNetworks::Core::IOSocketListener::Create(m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
