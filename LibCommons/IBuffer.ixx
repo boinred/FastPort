@@ -11,6 +11,7 @@ export class IBuffer
 {
 public:
     virtual ~IBuffer() = default;
+    virtual const int GetMaxSize() const = 0;
 
     // 현재 읽을 수 있는 데이터 크기를 반환.
     virtual size_t CanReadSize() const = 0;

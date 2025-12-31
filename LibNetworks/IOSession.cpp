@@ -18,18 +18,22 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     m_pSocket(std::move(pSocket))
 {
     // Recv는 고정 크기 버퍼를 재사용.
-    m_RecvOverlapped.Buffers.resize(64 * 1024);
+    m_RecvOverlapped.Buffers.resize(16 * 1024);
 }
 
 void IOSession::SendBuffer(const char* pData, size_t dataLength)
 {
     if (!pData || dataLength == 0 || !m_pSendBuffer)
     {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "SendBuffer() Invalid parameters. Session Id : {}", GetSessionId());
+
         return;
     }
 
     if (!m_pSendBuffer->Write(pData, dataLength))
     {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "SendBuffer() Failed to write data to send buffer. Session Id : {}, Data Length : {}", GetSessionId(), dataLength);
+
         return;
     }
 
@@ -83,19 +87,24 @@ bool IOSession::TryPostSendFromQueue()
         return true;
     }
 
-    if (!m_pSendBuffer || m_pSendBuffer->CanReadSize() == 0)
+    if (m_pSendBuffer->CanReadSize() == 0)
     {
+        LibCommons::Logger::GetInstance().LogCritical("IOSession", "TryPostSendFromQueue() No data to send. Session Id : {}", GetSessionId());
+
         m_SendInProgress.store(false);
         return true;
     }
 
-    const size_t bytesToSend = std::min<size_t>(m_pSendBuffer->CanReadSize(), 64 * 1024);
+    const size_t bytesToSend = std::min<size_t>(m_pSendBuffer->CanReadSize(), m_pSendBuffer->GetMaxSize());
 
     m_SendOverlapped.Buffers.resize(bytesToSend);
 
     if (!m_pSendBuffer->Peek(m_SendOverlapped.Buffers.data(), bytesToSend))
     {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "TryPostSendFromQueue() Failed to peek data from send buffer. Session Id : {}, Bytes To Send : {}", GetSessionId(), bytesToSend);
+
         m_SendInProgress.store(false);
+
         return false;
     }
 
@@ -138,6 +147,8 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
 
         if (!bSuccess)
         {
+            LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
+
             return;
         }
 
@@ -145,7 +156,7 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         {
             m_pReceiveBuffer->Write(m_RecvOverlapped.Buffers.data(), bytesTransferred);
 
-            (void)PostRecv();
+            PostRecv();
         }
 
         return;
@@ -157,19 +168,24 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
 
         if (!bSuccess)
         {
+            LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Send failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
+
             return;
         }
 
-        m_pSendBuffer->Consume(bytesTransferred);
 
-        const bool hasPending = m_pSendBuffer->CanReadSize() > 0;
+        m_pSendBuffer->Consume(bytesTransferred);
 
         OnSent(bytesTransferred);
 
-        if (hasPending)
+        const bool hasPending = m_pSendBuffer->CanReadSize() > 0;       
+
+        if (!hasPending)
         {
-            (void)TryPostSendFromQueue();
+            return;
         }
+
+        TryPostSendFromQueue();
 
         return;
     }

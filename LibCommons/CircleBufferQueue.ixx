@@ -30,6 +30,13 @@ public:
     CircleBufferQueue(const CircleBufferQueue&) = delete;
     CircleBufferQueue& operator=(const CircleBufferQueue&) = delete;
 
+    // 버퍼의 최대 크기를 반환.
+    const int GetMaxSize() const override
+    {
+        return static_cast<int>(m_Capacity);
+    }
+
+
     // 버퍼에 데이터를 씁니다.
     bool Write(const void* pData, size_t size) override
     {
