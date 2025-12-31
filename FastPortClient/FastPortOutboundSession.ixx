@@ -17,4 +17,18 @@ public:
         std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
     virtual ~FastPortOutboundSession() = default;
+
+    
+   
+    void OnConnected() override;
+
+
+    void OnDisconnected() override;
+
+
+    void OnReceive(const char* pData, size_t dataLength) override;
+
+
+    void OnSent(size_t bytesSent) override;
+
 };

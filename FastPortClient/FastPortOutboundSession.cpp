@@ -11,3 +11,23 @@ FastPortOutboundSession::FastPortOutboundSession(const std::shared_ptr<LibNetwor
 {
 
 }
+
+void FastPortOutboundSession::OnConnected()
+{
+    __super::OnConnected(); 
+}
+
+void FastPortOutboundSession::OnDisconnected()
+{
+    __super::OnDisconnected();
+}
+
+void FastPortOutboundSession::OnReceive(const char* pData, size_t dataLength)
+{
+    __super::OnReceive(pData, dataLength);
+}
+
+void FastPortOutboundSession::OnSent(size_t bytesSent)
+{
+    __super::OnSent(bytesSent);
+}

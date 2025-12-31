@@ -11,3 +11,24 @@ FastPortInboundSession::FastPortInboundSession(const std::shared_ptr<LibNetworks
 {
 
 }
+
+void FastPortInboundSession::OnAccepted()
+{
+    __super::OnAccepted();
+}
+
+void FastPortInboundSession::OnDisconnected()
+{
+    __super::OnDisconnected();
+}
+
+void FastPortInboundSession::OnReceive(const char* pData, size_t dataLength)
+{
+    __super::OnReceive(pData, dataLength);
+}
+
+void FastPortInboundSession::OnSent(size_t bytesSent)
+{
+    __super::OnSent(bytesSent);
+}
+ 

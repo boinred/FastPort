@@ -23,9 +23,9 @@ public:
         std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
         std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
-    void OnConnected() override;
+    virtual void OnConnected() override;
 
-    void OnDisconnected() override;
+    virtual void OnDisconnected() override;
 
 };
 
