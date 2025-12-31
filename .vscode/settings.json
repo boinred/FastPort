@@ -1,0 +1,7 @@
+{
+    "files.exclude": {
+        "_Builds": true,
+        "_Intermediate": true,
+        "vcpkg_installed": true
+    }
+}

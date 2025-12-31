@@ -6,6 +6,8 @@ export module networks.sessions.io_session;
 
 import networks.core.io_consumer;
 import networks.core.socket;
+import commons.buffers.ibuffer;
+import commons.buffers.circle_buffer_queue;
 
 namespace LibNetworks::Sessions
 {
@@ -43,7 +45,11 @@ protected:
     virtual void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override {}
 
 private:
-    std::shared_ptr<Core::Socket> m_pSocket{};
+    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(1024);
+    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(1024);
+
+
+    std::shared_ptr<Core::Socket> m_pSocket = {};
 
     uint64_t m_SessionId = m_NextSessionId.fetch_add(1, std::memory_order_relaxed);
 

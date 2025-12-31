@@ -12,6 +12,9 @@
     <ClCompile Include="CircleBufferQueue.ixx">
       <Filter>Buffers</Filter>
     </ClCompile>
+    <ClCompile Include="IBuffer.ixx">
+      <Filter>Buffers</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Buffers">

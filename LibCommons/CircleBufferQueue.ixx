@@ -8,11 +8,12 @@ export module commons.buffers.circle_buffer_queue;
 
 import std;
 import commons.rwlock;
+import commons.buffers.ibuffer;
 
 namespace LibCommons::Buffers
 {
 
-export class CircleBufferQueue
+export class CircleBufferQueue final : public IBuffer
 {
 public:
     explicit CircleBufferQueue(size_t capacity)
@@ -24,13 +25,13 @@ public:
         }
     }
 
-    ~CircleBufferQueue() = default;
+    ~CircleBufferQueue() override = default;
 
     CircleBufferQueue(const CircleBufferQueue&) = delete;
     CircleBufferQueue& operator=(const CircleBufferQueue&) = delete;
 
     // 버퍼에 데이터를 씁니다.
-    bool Write(const void* pData, size_t size)
+    bool Write(const void* pData, size_t size) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
 
@@ -57,7 +58,7 @@ public:
     }
 
     // 버퍼에서 데이터를 읽고 제거합니다.
-    bool Pop(void* outBuffer, size_t size)
+    bool Pop(void* outBuffer, size_t size) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
 
@@ -84,7 +85,7 @@ public:
     }
 
     // 버퍼에서 데이터를 읽기만 하고 제거하지 않습니다.
-    bool Peek(void* outBuffer, size_t size)
+    bool Peek(void* outBuffer, size_t size) override
     {
         auto lock = LibCommons::ReadLockBlock(m_RWLock);
 
@@ -108,7 +109,7 @@ public:
     }
 
     // 버퍼에서 데이터를 제거합니다.
-    bool Consume(size_t size)
+    bool Consume(size_t size) override
     {
         if (auto lock = LibCommons::WriteLockBlock(m_RWLock))
         {
@@ -124,19 +125,19 @@ public:
         return true;
     }
 
-    size_t CanReadSize() const
+    size_t CanReadSize() const override
     {
         auto lock = LibCommons::ReadLockBlock(m_RWLock);
         return m_Size;
     }
 
-    size_t CanWriteSize() const
+    size_t CanWriteSize() const override
     {
         auto lock = LibCommons::ReadLockBlock(m_RWLock);
         return m_Capacity - m_Size;
     }
 
-    void Clear()
+    void Clear() override
     {
         if (auto lock = LibCommons::WriteLockBlock(m_RWLock))
         {
