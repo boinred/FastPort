@@ -74,7 +74,7 @@ private:
     {
         OVERLAPPED Overlapped{};
         // 송신 완료까지 유지되는 송신 페이로드 저장소.
-        std::vector<char> SendBuffer{};
+        std::vector<char> Buffers{};
         // 이번 송신 요청 바이트 수.
         size_t RequestedBytes = 0;
 
