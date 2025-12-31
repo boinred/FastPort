@@ -1,7 +1,6 @@
 ﻿module;
 
 #include <utility>
-#include <mutex>
 #include <WinSock2.h>
 
 module networks.sessions.io_session;
@@ -13,8 +12,8 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer)
     : m_pReceiveBuffer(std::move(pReceiveBuffer)),
-      m_pSendBuffer(std::move(pSendBuffer)),
-      m_pSocket(std::move(pSocket))
+    m_pSendBuffer(std::move(pSendBuffer)),
+    m_pSocket(std::move(pSocket))
 {
 
 }
@@ -26,12 +25,9 @@ void IOSession::SendBuffer(const char* pData, size_t dataLength)
         return;
     }
 
+    if (!m_pSendBuffer->Write(pData, dataLength))
     {
-        std::lock_guard<std::mutex> lock(m_SendLock);
-        if (!m_pSendBuffer->Write(pData, dataLength))
-        {
-            return;
-        }
+        return;
     }
 
     (void)TryPostSendFromQueue();
@@ -88,26 +84,22 @@ bool IOSession::TryPostSendFromQueue()
     std::unique_ptr<OverlappedEx> pOverlapped(new OverlappedEx{});
     pOverlapped->Type = IOType::Send;
 
+    if (!m_pSendBuffer || m_pSendBuffer->CanReadSize() == 0)
     {
-        std::lock_guard<std::mutex> lock(m_SendLock);
-
-        if (!m_pSendBuffer || m_pSendBuffer->CanReadSize() == 0)
-        {
-            m_SendInProgress.store(false);
-            return true;
-        }
-
-        const size_t bytesToSend = std::min<size_t>(m_pSendBuffer->CanReadSize(), 64 * 1024);
-        pOverlapped->SendBuffer.resize(bytesToSend);
-
-        if (!m_pSendBuffer->Peek(pOverlapped->SendBuffer.data(), bytesToSend))
-        {
-            m_SendInProgress.store(false);
-            return false;
-        }
-
-        pOverlapped->RequestedBytes = bytesToSend;
+        m_SendInProgress.store(false);
+        return true;
     }
+
+    const size_t bytesToSend = std::min<size_t>(m_pSendBuffer->CanReadSize(), 64 * 1024);
+    pOverlapped->SendBuffer.resize(bytesToSend);
+
+    if (!m_pSendBuffer->Peek(pOverlapped->SendBuffer.data(), bytesToSend))
+    {
+        m_SendInProgress.store(false);
+        return false;
+    }
+
+    pOverlapped->RequestedBytes = bytesToSend;
 
     WSABUF wsaBuf{};
     wsaBuf.buf = pOverlapped->SendBuffer.data();
@@ -169,27 +161,20 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         break;
 
     case IOType::Send:
+    {
+        
+        m_pSendBuffer->Consume(bytesTransferred);
+        bool hasPending = m_pSendBuffer->CanReadSize() > 0;
+        OnSent(bytesTransferred);
+
+        m_SendInProgress.store(false);
+
+        if (hasPending)
         {
-            bool hasPending = false;
-            if (m_pSendBuffer)
-            {
-                std::lock_guard<std::mutex> lock(m_SendLock);
-                (void)m_pSendBuffer->Consume(bytesTransferred);
-                hasPending = (m_pSendBuffer->CanReadSize() > 0);
-            }
-
-            OnSent(bytesTransferred);
-
-            // 이번 Send 완료 처리 끝. 다음 Send를 걸 수 있게 플래그 해제.
-            m_SendInProgress.store(false);
-
-            if (hasPending)
-            {
-                (void)TryPostSendFromQueue();
-            }
+            TryPostSendFromQueue();
         }
         break;
     }
-}
+    }
 
 } // namespace LibNetworks::Sessions

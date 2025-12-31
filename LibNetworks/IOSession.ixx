@@ -4,7 +4,6 @@
 #include <array>
 #include <vector>
 #include <atomic>
-#include <mutex>
 #include <WinSock2.h>
 
 export module networks.sessions.io_session;
@@ -78,7 +77,6 @@ private:
 
     std::array<char, 64 * 1024> m_RecvTempBuffer{};
 
-    std::mutex m_SendLock;
     std::atomic_bool m_SendInProgress = false;
 
     std::shared_ptr<Core::Socket> m_pSocket = {};
