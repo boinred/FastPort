@@ -17,7 +17,8 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     m_pSendBuffer(std::move(pSendBuffer)),
     m_pSocket(std::move(pSocket))
 {
-
+    // Recv는 고정 크기 버퍼를 재사용.
+    m_RecvOverlapped.Buffers.resize(64 * 1024);
 }
 
 void IOSession::SendBuffer(const char* pData, size_t dataLength)
@@ -51,8 +52,8 @@ bool IOSession::PostRecv()
     m_RecvOverlapped.ResetOverlapped();
 
     WSABUF wsaBuf{};
-    wsaBuf.buf = m_RecvTempBuffer.data();
-    wsaBuf.len = static_cast<ULONG>(m_RecvTempBuffer.size());
+    wsaBuf.buf = m_RecvOverlapped.Buffers.data();
+    wsaBuf.len = static_cast<ULONG>(m_RecvOverlapped.Buffers.size());
 
     DWORD flags = 0;
     DWORD bytes = 0;
@@ -131,7 +132,7 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
     }
 
     // 멤버 Overlapped 주소로 구분
-    if (pOverlapped == &m_RecvOverlapped.Overlapped)
+    if (pOverlapped == &(m_RecvOverlapped.Overlapped))
     {
         m_RecvInProgress.store(false);
 
@@ -142,14 +143,15 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
 
         if (bytesTransferred > 0)
         {
-            OnReceive(m_RecvTempBuffer.data(), bytesTransferred);
+            m_pReceiveBuffer->Write(m_RecvOverlapped.Buffers.data(), bytesTransferred);
+
             (void)PostRecv();
         }
 
         return;
     }
 
-    if (pOverlapped == &m_SendOverlapped.Overlapped)
+    if (pOverlapped == &(m_SendOverlapped.Overlapped))
     {
         m_SendInProgress.store(false);
 
@@ -158,12 +160,9 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             return;
         }
 
-        if (m_pSendBuffer)
-        {
-            (void)m_pSendBuffer->Consume(bytesTransferred);
-        }
+        m_pSendBuffer->Consume(bytesTransferred);
 
-        const bool hasPending = m_pSendBuffer && (m_pSendBuffer->CanReadSize() > 0);
+        const bool hasPending = m_pSendBuffer->CanReadSize() > 0;
 
         OnSent(bytesTransferred);
 

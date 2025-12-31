@@ -1,7 +1,6 @@
 ﻿module;
 
 #include <memory>
-#include <array>
 #include <vector>
 #include <atomic>
 #include <WinSock2.h>
@@ -62,20 +61,13 @@ protected:
     void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
 
 private:
-    // IO 종류 구분(Recv/Send).
-    enum class IOType : uint8_t
-    {
-        Recv,
-        Send,
-    };
-
     // IOCP용 OVERLAPPED 확장 컨텍스트.
     struct OverlappedEx
     {
         OVERLAPPED Overlapped{};
-        // 송신 완료까지 유지되는 송신 페이로드 저장소.
+        // WSARecv/WSASend용 연속 버퍼 저장소.
         std::vector<char> Buffers{};
-        // 이번 송신 요청 바이트 수.
+        // 이번 요청 바이트 수.
         size_t RequestedBytes = 0;
 
         // OVERLAPPED 재사용을 위한 초기화.
@@ -97,9 +89,6 @@ private:
     std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer{};
     // 송신 데이터 누적 버퍼(큐).
     std::unique_ptr<LibCommons::Buffers::IBuffer> m_pSendBuffer{};
-
-    // WSARecv 임시 수신 버퍼.
-    std::array<char, 64 * 1024> m_RecvTempBuffer{};
 
     // 수신용 OVERLAPPED 컨텍스트
     OverlappedEx m_RecvOverlapped{};
