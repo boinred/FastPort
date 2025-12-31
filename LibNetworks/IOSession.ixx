@@ -1,6 +1,11 @@
 ﻿module;
 
 #include <memory>
+#include <array>
+#include <vector>
+#include <atomic>
+#include <mutex>
+#include <WinSock2.h>
 
 export module networks.sessions.io_session;
 
@@ -36,6 +41,7 @@ public:
     virtual void OnSent(size_t bytesSent) {}
 
     void SendBuffer(const char* pData, size_t dataLength);
+
 protected:
     void RequestReceived();
 
@@ -43,11 +49,37 @@ protected:
     const std::shared_ptr<Core::Socket> GetSocket() const { return m_pSocket; }
 
     // IIOConsumer을(를) 통해 상속됨
-    virtual void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override {}
+    void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
+
+private:
+    enum class IOType : uint8_t
+    {
+        Recv,
+        Send,
+    };
+
+    struct OverlappedEx
+    {
+        OVERLAPPED Overlapped{};
+        IOType Type{};
+        std::vector<char> SendBuffer{}; // Send일 때 WSASend 완료까지 데이터 유지
+        size_t RequestedBytes = 0;
+    };
+
+private:
+    bool PostRecv();
+
+    // 큐를 사용한 Send
+    bool TryPostSendFromQueue();
 
 private:
     std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer{};
     std::unique_ptr<LibCommons::Buffers::IBuffer> m_pSendBuffer{};
+
+    std::array<char, 64 * 1024> m_RecvTempBuffer{};
+
+    std::mutex m_SendLock;
+    std::atomic_bool m_SendInProgress = false;
 
     std::shared_ptr<Core::Socket> m_pSocket = {};
 
