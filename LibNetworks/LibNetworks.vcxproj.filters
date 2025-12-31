@@ -12,7 +12,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="iOService.cpp">
+    <ClCompile Include="IOService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
     <ClCompile Include="IOService.ixx">

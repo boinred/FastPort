@@ -71,6 +71,7 @@ void IOSocketConnector::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVE
     m_bConnected = true;
 
     std::shared_ptr<Sessions::OutboundSession> pSession = m_pOnDoFuncCreateSession(m_pSocket);
+    m_pIOService->Associate(m_pSocket->GetSocket(), pSession->GetCompletionId());
 
     pSession->OnConnected();
 

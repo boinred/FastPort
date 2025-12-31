@@ -4,6 +4,8 @@
 
 module fastport_outbound_session;
 
+import std; 
+
 FastPortOutboundSession::FastPortOutboundSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer)
@@ -15,6 +17,10 @@ FastPortOutboundSession::FastPortOutboundSession(const std::shared_ptr<LibNetwor
 void FastPortOutboundSession::OnConnected()
 {
     __super::OnConnected(); 
+
+    std::string msg = "Hello FastPort Server!";
+
+    SendBuffer(msg.c_str(), msg.size());
 }
 
 void FastPortOutboundSession::OnDisconnected()

@@ -22,7 +22,7 @@
     <ClCompile Include="InboundSession.cpp" />
     <ClCompile Include="InboundSession.ixx" />
     <ClCompile Include="IOConsumer.ixx" />
-    <ClCompile Include="iOService.cpp" />
+    <ClCompile Include="IOService.cpp" />
     <ClCompile Include="IOService.ixx" />
     <ClCompile Include="IOSession.cpp" />
     <ClCompile Include="IOSession.ixx" />

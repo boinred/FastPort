@@ -81,9 +81,10 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
         else
         {
             std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(std::make_shared<Socket>(pAcceptOverlapped->AcceptSocket));
+            m_pIOService->Associate(pAcceptOverlapped->AcceptSocket, pInboundSession->GetCompletionId());
 
             pInboundSession->OnAccepted();
-
+          
             // 컨테이너에 저장.
         }
     }
