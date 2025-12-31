@@ -89,8 +89,6 @@ bool IOSession::TryPostSendFromQueue()
 
     if (m_pSendBuffer->CanReadSize() == 0)
     {
-        LibCommons::Logger::GetInstance().LogCritical("IOSession", "TryPostSendFromQueue() No data to send. Session Id : {}", GetSessionId());
-
         m_SendInProgress.store(false);
         return true;
     }
