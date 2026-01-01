@@ -16,7 +16,7 @@ public:
         std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
         std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
-    virtual ~FastPortOutboundSession() = default;
+    virtual ~FastPortOutboundSession();
 
     
    

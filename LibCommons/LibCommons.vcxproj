@@ -28,6 +28,7 @@
     <ClCompile Include="ServiceMode.cpp" />
     <ClCompile Include="ServiceMode.ixx" />
     <ClCompile Include="SingleTon.ixx" />
+    <ClCompile Include="Container.ixx" />
     <ClCompile Include="StrConverter.ixx" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

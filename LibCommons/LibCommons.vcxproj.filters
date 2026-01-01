@@ -15,6 +15,7 @@
     <ClCompile Include="IBuffer.ixx">
       <Filter>Buffers</Filter>
     </ClCompile>
+    <ClCompile Include="Container.ixx" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Buffers">

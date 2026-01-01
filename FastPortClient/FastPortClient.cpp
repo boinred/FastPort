@@ -14,6 +14,10 @@ import networks.services.io_service;
 import networks.core.io_socket_connector;
 import networks.sessions.outbound_session;
 import fastport_outbound_session;
+import commons.container; 
+
+using SessionContainer = LibCommons::Container<uint64_t, std::shared_ptr<LibNetworks::Sessions::OutboundSession>>;
+
 
 int main()
 {
@@ -45,9 +49,17 @@ int main()
 
     auto pOnFuncCreateSession = [](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::OutboundSession>
         {
-            auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
-            auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
-            return std::make_shared<FastPortOutboundSession>(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer));
+            const size_t bufferSize = 8 * 1024;
+
+            auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufferSize);
+            auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufferSize);
+
+            auto pSession = std::make_shared<FastPortOutboundSession>(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer));
+
+            auto & sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
+            sessions.Add(pSession->GetSessionId(), pSession);
+
+            return pSession;
         };
 
     for (int i = 0; i < 1; i++)
