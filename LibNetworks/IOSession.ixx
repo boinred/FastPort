@@ -53,7 +53,6 @@ protected:
     // 지속 수신을 위한 Recv 재등록.
     void RequestReceived();
 
-protected:
     // 세션 소켓 조회.
     const std::shared_ptr<Core::Socket> GetSocket() const { return m_pSocket; }
 
@@ -61,6 +60,9 @@ protected:
     virtual void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
 
 private:
+
+    void ReadReceivedBuffers();
+
     // IOCP용 OVERLAPPED 확장 컨텍스트.
     struct OverlappedEx
     {

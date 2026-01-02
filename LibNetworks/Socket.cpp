@@ -122,7 +122,7 @@ bool Socket::Listen(unsigned int maxConnectionCount)
     return true;
 }
 
-bool Socket::UpdateConnectContext()
+bool Socket::UpdateConnectContext() const
 {
     if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0))
     {

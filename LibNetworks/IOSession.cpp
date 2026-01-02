@@ -165,7 +165,10 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             return;
         }
 
-        PostRecv();
+        ReadReceivedBuffers();
+
+        RequestReceived();
+
         return;
     }
 
@@ -210,6 +213,11 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
 
         return;
     }
+}
+
+void IOSession::ReadReceivedBuffers()
+{
+
 }
 
 } // namespace LibNetworks::Sessions

@@ -75,7 +75,7 @@ public:
         return const_cast<SOCKET&>(rfThis.GetSocket());
     }
 
-    bool UpdateConnectContext();
+    bool UpdateConnectContext() const;
 private:
     SOCKET m_Socket = INVALID_SOCKET;
     sockaddr_in m_SockAddr = {};

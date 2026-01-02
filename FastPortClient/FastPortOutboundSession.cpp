@@ -28,6 +28,8 @@ void FastPortOutboundSession::OnConnected()
     std::string msg = "Hello FastPort Server!";
 
     SendBuffer(msg.c_str(), msg.size());
+
+    LibCommons::Logger::GetInstance().LogInfo("FastPortOutboundSession", "OnConnected, SendBuffer, Session Id : {}, Sent Message : {}, Size : {}", GetSessionId(), msg, msg.size());
 }
 
 void FastPortOutboundSession::OnDisconnected()
@@ -38,6 +40,10 @@ void FastPortOutboundSession::OnDisconnected()
 void FastPortOutboundSession::OnReceive(const char* pData, size_t dataLength)
 {
     __super::OnReceive(pData, dataLength);
+
+    SendBuffer(pData, dataLength);
+
+    LibCommons::Logger::GetInstance().LogInfo("FastPortOutboundSession", "OnReceive, SendBuffer, Session Id : {}, Sent Message : {}, Size : {}", GetSessionId(), pData, dataLength);
 }
 
 void FastPortOutboundSession::OnSent(size_t bytesSent)
