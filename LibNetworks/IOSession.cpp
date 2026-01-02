@@ -1,6 +1,7 @@
 ﻿module;
 
 #include <utility>
+#include <vector>
 #include <WinSock2.h>
 #include <spdlog/spdlog.h>
 
@@ -217,7 +218,32 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
 
 void IOSession::ReadReceivedBuffers()
 {
+    if (!m_pReceiveBuffer)
+    {
+        return;
+    }
 
+    const size_t canRead = m_pReceiveBuffer->CanReadSize();
+    if (canRead == 0)
+    {
+        return;
+    }
+
+    std::vector<char> temp;
+    temp.resize(canRead);
+
+    if (!m_pReceiveBuffer->Peek(temp.data(), canRead))
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "ReadReceivedBuffers() Peek failed. Session Id : {}, Bytes : {}", GetSessionId(), canRead);
+        return;
+    }
+
+    if (!m_pReceiveBuffer->Consume(canRead))
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "ReadReceivedBuffers() Consume failed. Session Id : {}, Bytes : {}", GetSessionId(), canRead);
+
+    }
+    OnReceive(temp.data(), canRead);
 }
 
 } // namespace LibNetworks::Sessions
