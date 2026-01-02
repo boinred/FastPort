@@ -1,7 +1,7 @@
 ﻿module;
 
 #include <WS2tcpip.h>
-
+#include <MSWSock.h>
 //  message : IFC 가져오기가 감지되었습니다. 발생함으로 추가.
 #include <spdlog/spdlog.h>
 #pragma comment(lib, "ws2_32.lib")
@@ -122,5 +122,16 @@ bool Socket::Listen(unsigned int maxConnectionCount)
     return true;
 }
 
+bool Socket::UpdateConnectContext()
+{
+    if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "OnIOCompleted: setsockopt(SO_UPDATE_CONNECT_CONTEXT) failed. Error: {}", ::WSAGetLastError());
+
+        return false; 
+    }
+
+    return true; 
+}
 
 } // namespace LibNetworks::Core

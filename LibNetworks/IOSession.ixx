@@ -58,7 +58,7 @@ protected:
     const std::shared_ptr<Core::Socket> GetSocket() const { return m_pSocket; }
 
     // IOCP 완료 통지 처리 진입점.
-    void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
+    virtual void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
 
 private:
     // IOCP용 OVERLAPPED 확장 컨텍스트.

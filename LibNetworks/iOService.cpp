@@ -65,7 +65,7 @@ bool IOService::Start(unsigned int numThreads)
                         auto pConsumer = reinterpret_cast<Core::IIOConsumer*>(completionId);
                         if (pConsumer)
                         {
-                            pConsumer->OnIOCompleted(false, bytesTransferred, pOverlapped);
+                            pConsumer->OnIOCompleted(FALSE, bytesTransferred, pOverlapped);
                         }
 
                         continue;
@@ -170,6 +170,7 @@ bool IOService::Post(ULONG_PTR uCompletionKey, DWORD bytes, OVERLAPPED* ov) cons
 
 bool IOService::CreateCompletionPort()
 {
+
     m_hICOP = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 0);
     if (m_hICOP == nullptr)
     {

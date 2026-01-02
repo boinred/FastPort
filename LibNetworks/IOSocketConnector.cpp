@@ -42,40 +42,12 @@ void IOSocketConnector::DisConnect()
 
     m_pSocket->Close();
     m_bConnected = false;
+    m_pSession = {};
 
     LibCommons::Logger::GetInstance().LogInfo("IOSocketConnector", "IOSocketConnector DisConnected.");
 }
 
 //------------------------------------------------------------------------ 
-void IOSocketConnector::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped)
-{
-    std::unique_ptr<OVERLAPPED> spOverlapped(pOverlapped);
-
-    if (!bSuccess)
-    {
-        DWORD dwError = ::GetLastError();
-
-        LibCommons::Logger::GetInstance().LogError("SocketConnector", "OnIOCompleted: ConnectEx failed. Error : {}", dwError);
-        DisConnect();
-        return;
-    }
-
-    // ConnectEx 완료 후 소켓 컨텍스트 업데이트
-    if (::setsockopt(m_pSocket->GetSocket(), SOL_SOCKET, SO_UPDATE_CONNECT_CONTEXT, nullptr, 0) == SOCKET_ERROR)
-    {
-        LibCommons::Logger::GetInstance().LogError("SocketConnector", "OnIOCompleted: setsockopt(SO_UPDATE_CONNECT_CONTEXT) failed. Error: {}", ::WSAGetLastError());
-        DisConnect();
-        return;
-    }
-
-    m_bConnected = true;
-
-    std::shared_ptr<Sessions::OutboundSession> pSession = m_pOnDoFuncCreateSession(m_pSocket);
-    m_pIOService->Associate(m_pSocket->GetSocket(), pSession->GetCompletionId());
-
-    pSession->OnConnected();
-
-}
 
 //------------------------------------------------------------------------ 
 bool IOSocketConnector::Connect(std::string ip, const unsigned short port)
@@ -97,14 +69,19 @@ bool IOSocketConnector::Connect(std::string ip, const unsigned short port)
         return false;
     }
 
+    m_pSession = m_pOnDoFuncCreateSession(m_pSocket);
+
     // 4. IOCP에 소켓 연결
-    if (!m_pIOService->Associate(m_pSocket->GetSocket(), GetCompletionId()))
+    if (!m_pIOService->Associate(m_pSocket->GetSocket(), m_pSession->GetCompletionId()))
     {
-        logger.LogError("SocketConnector", "Associate failed.");
+        logger.LogError("SocketConnector", "Connect, Associate failed. OutboundSession Id : {}", m_pSession->GetSessionId());
+        
         DisConnect();
 
         return false;
     }
+
+    LibCommons::Logger::GetInstance().LogInfo("SocketConnector", "Connect, IOSocketConnector Associate. OutboundSession Id : {}", m_pSession->GetSessionId());
 
     // 5. ConnectEx 함수 포인터 가져오기
     GUID guidConnectEx = WSAID_CONNECTEX;
@@ -145,8 +122,6 @@ bool IOSocketConnector::ConnectEx(std::string ip, const unsigned short port)
     Socket::CreateSocketAddress(remoteAddr, ip, port);
 
     // 2. ConnectEx 호출
-    OVERLAPPED* pOverlapped = new OVERLAPPED();
-
     bool bResult = m_lpfnConnectEx(
         m_pSocket->GetSocket(),							// 소켓
         reinterpret_cast<const sockaddr*>(&remoteAddr),	// 서버 주소
@@ -154,7 +129,7 @@ bool IOSocketConnector::ConnectEx(std::string ip, const unsigned short port)
         nullptr,										// 전송 버퍼
         0,												// 전송 버퍼 길이
         nullptr,										// 실제 전송된 바이트 수
-        pOverlapped										// OVERLAPPED 구조체
+        &(m_pSession->GetConnectOverlapped())			// OVERLAPPED 구조체
     );
 
     if (!bResult)
@@ -163,12 +138,11 @@ bool IOSocketConnector::ConnectEx(std::string ip, const unsigned short port)
         if (ERROR_IO_PENDING != nError)
         {
             logger.LogError("SocketConnector", "ConnectEx failed. Error : {}", nError);
-            delete pOverlapped;
             return false;
         }
     }
 
-    logger.LogInfo("SocketConnector", "Connecting to.");
+    logger.LogInfo("SocketConnector", "Connecting to. IP : {}, Port : {}", ip, port);
 
     return true;
 }

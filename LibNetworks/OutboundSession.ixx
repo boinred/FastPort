@@ -27,6 +27,21 @@ public:
 
     virtual void OnDisconnected() override;
 
+    // GET : ConnectOverlapped 
+    const OVERLAPPED& GetConnectOverlapped() const { return m_ConnectOverlapped; }
+    OVERLAPPED& GetConnectOverlapped()
+    {
+        const OutboundSession& rfThis = *this;
+        return const_cast<OVERLAPPED&>(rfThis.GetConnectOverlapped());
+    }
+
+protected:
+    void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
+
+
+private:
+    OVERLAPPED m_ConnectOverlapped;
+
 };
 
 } // namespace LibNetworks::Sessions
