@@ -49,6 +49,7 @@ public:
     // 송신 큐 적재 및 비동기 송신 트리거.
     void SendBuffer(const char* pData, size_t dataLength);
 
+
 protected:
     // 지속 수신을 위한 Recv 재등록.
     void RequestReceived();
@@ -86,6 +87,9 @@ private:
     // 송신 큐 기반 비동기 송신(WSASend) 등록.
     bool TryPostSendFromQueue();
 
+protected:
+    void RequestDisconnect();
+
 private:
     // 수신 데이터 누적 버퍼(큐).
     std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer{};
@@ -103,6 +107,8 @@ private:
 
     // 송신 outstanding 중복 방지 플래그.
     std::atomic_bool m_SendInProgress = false;
+
+    std::atomic_bool m_DisconnectRequested = false;
 
     // 세션 소켓 핸들
     std::shared_ptr<Core::Socket> m_pSocket = {};

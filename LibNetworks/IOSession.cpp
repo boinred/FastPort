@@ -246,4 +246,43 @@ void IOSession::ReadReceivedBuffers()
     OnReceive(temp.data(), canRead);
 }
 
+void IOSession::RequestDisconnect()
+{
+    auto& logger = LibCommons::Logger::GetInstance();
+
+    bool expected = false;
+    if (!m_DisconnectRequested.compare_exchange_strong(expected, true))
+    {
+        return;
+    }
+
+    if (!m_pSocket)
+    {
+        logger.LogWarning("IOSession", "RequestDisconnect() Socket is null. Session Id : {}", GetSessionId());
+        OnDisconnected();
+        return;
+    }
+
+    // 강제 종료: send/recv 중단 + 즉시 close
+    m_pSocket->Shutdown(SD_BOTH);
+    m_pSocket->Close();
+
+    m_RecvInProgress.store(false);
+    m_SendInProgress.store(false);
+
+    if (m_pReceiveBuffer)
+    {
+        m_pReceiveBuffer->Clear();
+    }
+
+    if (m_pSendBuffer)
+    {
+        m_pSendBuffer->Clear();
+    }
+
+    logger.LogInfo("IOSession", "RequestDisconnect() Socket closed. Session Id : {}", GetSessionId());
+
+    OnDisconnected();
+}
+
 } // namespace LibNetworks::Sessions

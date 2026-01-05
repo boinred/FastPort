@@ -42,7 +42,10 @@ public:
     // TCP 소켓 생성
     void CreateSocket();
 
-    // 소켓 닫기
+    // 소켓 송수신 종료
+    void Shutdown(int how = SD_BOTH);
+
+    // 소켓 핸들 닫기
     void Close();
 
     // 로컬 주소 정보 설정

@@ -71,10 +71,19 @@ void Socket::CreateSocket()
     LibCommons::Logger::GetInstance().LogInfo("Socket", "Socket Created.");
 }
 
+void Socket::Shutdown(int how)
+{
+    if (m_Socket == INVALID_SOCKET)
+    {
+        return;
+    }
+
+    ::shutdown(m_Socket, how);
+}
 
 void Socket::Close()
 {
-    if (INVALID_SOCKET == m_Socket)
+    if (m_Socket == INVALID_SOCKET)
     {
         return;
     }
@@ -128,10 +137,10 @@ bool Socket::UpdateConnectContext() const
     {
         LibCommons::Logger::GetInstance().LogError("Socket", "OnIOCompleted: setsockopt(SO_UPDATE_CONNECT_CONTEXT) failed. Error: {}", ::WSAGetLastError());
 
-        return false; 
+        return false;
     }
 
-    return true; 
+    return true;
 }
 
 } // namespace LibNetworks::Core
