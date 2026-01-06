@@ -7,6 +7,10 @@ module fastport_outbound_session;
 
 import std; 
 import commons.logger;
+import commons.container; 
+import commons.singleton;
+
+using SessionContainer = LibCommons::Container<uint64_t, std::shared_ptr<LibNetworks::Sessions::OutboundSession>>;
 
 FastPortOutboundSession::FastPortOutboundSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
@@ -25,6 +29,9 @@ void FastPortOutboundSession::OnConnected()
 {
     __super::OnConnected(); 
 
+    auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
+    sessions.Add(GetSessionId(), std::dynamic_pointer_cast<FastPortOutboundSession>(shared_from_this()));
+
     std::string msg = "Hello FastPort Server!";
 
     SendBuffer(msg.c_str(), msg.size());
@@ -35,6 +42,9 @@ void FastPortOutboundSession::OnConnected()
 void FastPortOutboundSession::OnDisconnected()
 {
     __super::OnDisconnected();
+
+    auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
+    sessions.Remove(GetSessionId());
 }
 
 void FastPortOutboundSession::OnReceive(const char* pData, size_t dataLength)

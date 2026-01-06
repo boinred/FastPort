@@ -84,8 +84,6 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
             m_pIOService->Associate(pAcceptOverlapped->AcceptSocket, pInboundSession->GetCompletionId());
 
             pInboundSession->OnAccepted();
-          
-            // 컨테이너에 저장.
         }
     }
 

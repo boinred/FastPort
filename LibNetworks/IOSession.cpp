@@ -147,7 +147,7 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         if (!bSuccess)
         {
             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
-            OnDisconnected();
+            RequestDisconnect();
             return;
         }
 
@@ -155,14 +155,14 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         if (bytesTransferred == 0)
         {
             LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv 0 byte. Disconnected. Session Id : {}", GetSessionId());
-            OnDisconnected();
+            RequestDisconnect();
             return;
         }
 
         if (!m_pReceiveBuffer->Write(m_RecvOverlapped.Buffers.data(), bytesTransferred))
         {
             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Receive buffer overflow. Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
-            OnDisconnected();
+            RequestDisconnect();
             return;
         }
 
@@ -180,7 +180,7 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         if (!bSuccess)
         {
             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Send failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
-            OnDisconnected();
+            RequestDisconnect();
             return;
         }
 
@@ -199,7 +199,7 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         if (!m_pSendBuffer->Consume(bytesTransferred))
         {
             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Send buffer consume failed. Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
-            OnDisconnected();
+            RequestDisconnect();
             return;
         }
 

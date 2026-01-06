@@ -49,6 +49,8 @@ public:
     // 송신 큐 적재 및 비동기 송신 트리거.
     void SendBuffer(const char* pData, size_t dataLength);
 
+    
+
 
 protected:
     // 지속 수신을 위한 Recv 재등록.

@@ -52,7 +52,7 @@ bool IOService::Start(unsigned int numThreads)
                     DWORD dwError = ::GetLastError();
                     if (ERROR_ABANDONED_WAIT_0 == dwError || ERROR_CONNECTION_ABORTED == dwError)
                     {
-                        // IOCC 정상종료
+                        // IOCP 정상종료
                         logger.LogError("IOService", "Worker thread, IOCP handle closed or operation aborted. Error : {}", dwError);
 
                         break;

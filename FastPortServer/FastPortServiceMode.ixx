@@ -17,9 +17,8 @@ import networks.core.io_socket_listener;
 import networks.sessions.inbound_session;
 
 import fastport_inbound_session;
-import commons.container; 
 
-using SessionContainer = LibCommons::Container<uint64_t, std::shared_ptr<LibNetworks::Sessions::InboundSession>>;
+
 
 export class FastPortServiceMode : public LibCommons::ServiceMode
 {
@@ -37,9 +36,6 @@ protected:
                 auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
                 auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
                 auto pSession = std::make_shared<FastPortInboundSession>(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer));
-
-                auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
-                sessions.Add(pSession->GetSessionId(), pSession);
 
                 return pSession;
             };

@@ -2,9 +2,14 @@
 
 #include <utility>
 #include <spdlog/spdlog.h>
+#include <memory>
 
 module fastport_inbound_session;
 import commons.logger;
+import commons.container; 
+import commons.singleton;
+
+using SessionContainer = LibCommons::Container<uint64_t, std::shared_ptr<LibNetworks::Sessions::InboundSession>>;
 
 FastPortInboundSession::FastPortInboundSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
@@ -17,11 +22,18 @@ FastPortInboundSession::FastPortInboundSession(const std::shared_ptr<LibNetworks
 void FastPortInboundSession::OnAccepted()
 {
     __super::OnAccepted();
+
+
+    auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
+    sessions.Add(GetSessionId(), std::dynamic_pointer_cast<FastPortInboundSession>(shared_from_this()));
 }
 
 void FastPortInboundSession::OnDisconnected()
 {
     __super::OnDisconnected();
+
+    auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
+    sessions.Remove(GetSessionId());
 }
 
 void FastPortInboundSession::OnReceive(const char* pData, size_t dataLength)
