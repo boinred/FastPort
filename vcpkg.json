@@ -2,6 +2,7 @@
   "dependencies": [
     "spdlog",
     "cxxopts",
-    "protobuf"
+    "protobuf",
+    "grpc"
   ]
 }

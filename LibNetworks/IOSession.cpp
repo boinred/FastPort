@@ -243,6 +243,7 @@ void IOSession::ReadReceivedBuffers()
         LibCommons::Logger::GetInstance().LogError("IOSession", "ReadReceivedBuffers() Consume failed. Session Id : {}, Bytes : {}", GetSessionId(), canRead);
 
     }
+
     OnReceive(temp.data(), canRead);
 }
 

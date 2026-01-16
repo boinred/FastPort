@@ -16,4 +16,5 @@
   <Project Path="LibCommonsTests/LibCommonsTests.vcxproj" />
   <Project Path="LibNetworks/LibNetworks.vcxproj" Id="82bd6e86-a438-4a32-847c-229e1d77ffa8" />
   <Project Path="LibNetworksTests/LibNetworksTests.vcxproj" />
+  <Project Path="Protocols/Protocols.vcxproj" Id="17dbf54e-3460-402c-a2b0-75ff9cbabcbd" />
 </Solution>

@@ -1,0 +1,50 @@
+﻿syntax = "proto3";
+
+import "Commons.proto";
+package fastport.protocols.tests;
+
+option optimize_for = SPEED;
+
+message PingRequest 
+{
+	commons.Header header	= 1;
+	string payload	= 2;
+}
+
+message PingResponse 
+{
+	commons.Header		header	= 1;
+	commons.ResultCode	result	= 2;
+	string		payload = 3;
+}
+
+message EchoRequest 
+{
+	commons.Header	header	= 1;
+	bytes	data	= 2;
+}
+
+message EchoResponse 
+{
+	commons.Header		header = 1;
+	commons.ResultCode	result = 2;
+	bytes				data = 3;
+}
+
+message ErrorResponse 
+{
+	commons.Header		header		= 1;
+	commons.ResultCode	result		= 2;
+	string				message		= 3;
+	int32				error_code	= 4;
+}
+
+service TestService 
+{
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+
+
+// Basic test-purpose protocol definitions.
