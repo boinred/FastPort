@@ -12,6 +12,7 @@ export module networks.sessions.io_session;
 import networks.core.io_consumer;
 import networks.core.socket;
 import networks.core.packet;
+import networks.core.packet_framer;
 import commons.buffers.ibuffer;
 
 namespace LibNetworks::Sessions
@@ -124,6 +125,8 @@ private:
 
     // 세션 식별자 시퀀스.
     inline static std::atomic<uint64_t> m_NextSessionId = 1;
+
+    Core::PacketFramer m_PacketFramer{};
 
 };
 

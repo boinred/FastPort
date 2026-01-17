@@ -12,7 +12,7 @@
 module networks.sessions.io_session;
 import commons.logger;
 import networks.core.packet;
-import commons.event_listener;
+import networks.core.packet_framer;
 
 namespace LibNetworks::Sessions
 {
@@ -238,57 +238,15 @@ void IOSession::ReadReceivedBuffers()
         return;
     }
 
-    ProcessReceiveQueue();
-}
-
-void IOSession::ProcessReceiveQueue()
-{
-    auto& logger = LibCommons::Logger::GetInstance();
-
-    for (;;)
+    while (true)
     {
-        const size_t canRead = m_pReceiveBuffer ? m_pReceiveBuffer->CanReadSize() : 0;
-        if (canRead < Core::Packet::GetHeaderSize())
+        auto packetOpt = m_PacketFramer.TryPop(*m_pReceiveBuffer);
+        if (!packetOpt.has_value())
         {
             return;
         }
 
-        unsigned char headerBuffer[Core::Packet::GetHeaderSize()]{}; // Use GetHeaderSize()
-        if (!m_pReceiveBuffer->Peek(headerBuffer, Core::Packet::GetHeaderSize()))
-        {
-            logger.LogError("IOSession", "ProcessReceiveQueue() Peek header failed. Session Id : {}", GetSessionId());
-            RequestDisconnect();
-            return;
-        }
-
-        const auto bufferSize = Core::Packet::GetHeaderFromBuffer(headerBuffer);
-        if (0 >= bufferSize)
-        {
-            logger.LogError("IOSession", "ProcessReceiveQueue() Invalid packet size. Session Id : {}, PacketSize : {}", GetSessionId(), bufferSize);
-            RequestDisconnect();
-            return;
-        }
-
-        if (canRead < bufferSize)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            return; // wait for more data
-        }
-
-        std::vector<unsigned char> buffers;
-        buffers.resize(bufferSize);
-
-        if (!m_pReceiveBuffer->Pop(buffers.data(), bufferSize))
-        {
-            logger.LogError("IOSession", "ProcessReceiveQueue() Pop payload failed. Session Id : {}, Buffer Size : {}", GetSessionId(), bufferSize);
-            RequestDisconnect();
-            return;
-        }
-
-        LibCommons::EventListener::GetInstance().Enqueue([ptr = shared_from_this(), buffers = std::move(buffers)]() mutable
-            {
-                ptr->OnPacketReceived(Core::Packet(std::move(buffers)));
-            });
+        OnPacketReceived(*packetOpt);
     }
 }
 
