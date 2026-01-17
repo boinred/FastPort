@@ -57,5 +57,6 @@
     <ClCompile Include="Socket.ixx">
       <Filter>Core</Filter>
     </ClCompile>
+    <ClCompile Include="Packet.ixx" />
   </ItemGroup>
 </Project>

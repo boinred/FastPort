@@ -2,11 +2,16 @@
 
 #include <utility>
 #include <vector>
+#include <string>
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
 #include <WinSock2.h>
 #include <spdlog/spdlog.h>
 
 module networks.sessions.io_session;
 import commons.logger;
+import networks.core.packet;
 
 namespace LibNetworks::Sessions
 {
@@ -22,7 +27,7 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     m_RecvOverlapped.Buffers.resize(16 * 1024);
 }
 
-void IOSession::SendBuffer(const char* pData, size_t dataLength)
+void IOSession::SendBuffer(const unsigned char* pData, size_t dataLength)
 {
     if (!pData || dataLength == 0 || !m_pSendBuffer)
     {
@@ -39,6 +44,16 @@ void IOSession::SendBuffer(const char* pData, size_t dataLength)
     }
 
     TryPostSendFromQueue();
+}
+
+void IOSession::SendMessage(const short packetId, const google::protobuf::Message& rfMessage)
+{
+    std::ostringstream os;
+    rfMessage.SerializePartialToOstream(&os);
+
+    const Core::Packet packet(packetId, os.str());
+
+    SendBuffer(packet.GetRawData(), packet.GetPacketSize());
 }
 
 void IOSession::RequestReceived()
@@ -151,7 +166,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             return;
         }
 
-        // 0-byte recv는 graceful close로 간주
         if (bytesTransferred == 0)
         {
             LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv 0 byte. Disconnected. Session Id : {}", GetSessionId());
@@ -223,28 +237,65 @@ void IOSession::ReadReceivedBuffers()
         return;
     }
 
-    const size_t canRead = m_pReceiveBuffer->CanReadSize();
-    if (canRead == 0)
+    ProcessReceiveQueue();
+}
+
+void IOSession::ProcessReceiveQueue()
+{
+    auto& logger = LibCommons::Logger::GetInstance();
+
+    while (true)
     {
-        return;
+        const size_t canRead = m_pReceiveBuffer ? m_pReceiveBuffer->CanReadSize() : 0;
+        if (canRead < Core::Packet::GetHeaderSize())
+        {
+            return;
+        }
+
+        unsigned char headerBuffer[Core::Packet::GetHeaderSize()]{}; // Use GetHeaderSize()
+        if (!m_pReceiveBuffer->Peek(headerBuffer, Core::Packet::GetHeaderSize()))
+        {
+            logger.LogError("IOSession", "ProcessReceiveQueue() Peek header failed. Session Id : {}", GetSessionId());
+            RequestDisconnect();
+            return;
+        }
+
+        const auto bufferSize = Core::Packet::GetHeaderFromBuffer(headerBuffer);
+        if (0 >= bufferSize)
+        {
+            logger.LogError("IOSession", "ProcessReceiveQueue() Invalid packet size. Session Id : {}, PacketSize : {}", GetSessionId(), bufferSize);
+            RequestDisconnect();
+            return;
+        }
+
+        if (canRead < bufferSize)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            return; // wait for more data
+        }
+
+        //// Consume header
+        //if (!m_pReceiveBuffer->Consume(Core::Packet::HeaderSize))
+        //{
+        //    logger.LogError("IOSession", "ProcessReceiveQueue() Consume header failed. Session Id : {}", GetSessionId());
+        //    RequestDisconnect();
+        //    return;
+        //}
+
+        std::vector<unsigned char> buffers;
+        buffers.resize(bufferSize);
+
+        if (!m_pReceiveBuffer->Pop(buffers.data(), bufferSize))
+        {
+            logger.LogError("IOSession", "ProcessReceiveQueue() Pop payload failed. Session Id : {}, Buffer Size : {}", GetSessionId(), bufferSize);
+            RequestDisconnect();
+            return;
+        }
+
+        const Core::Packet receivedPacket(std::move(buffers));
+
+        OnPacketReceived(receivedPacket);
     }
-
-    std::vector<char> temp;
-    temp.resize(canRead);
-
-    if (!m_pReceiveBuffer->Peek(temp.data(), canRead))
-    {
-        LibCommons::Logger::GetInstance().LogError("IOSession", "ReadReceivedBuffers() Peek failed. Session Id : {}, Bytes : {}", GetSessionId(), canRead);
-        return;
-    }
-
-    if (!m_pReceiveBuffer->Consume(canRead))
-    {
-        LibCommons::Logger::GetInstance().LogError("IOSession", "ReadReceivedBuffers() Consume failed. Session Id : {}, Bytes : {}", GetSessionId(), canRead);
-
-    }
-
-    OnReceive(temp.data(), canRead);
 }
 
 void IOSession::RequestDisconnect()
@@ -285,5 +336,7 @@ void IOSession::RequestDisconnect()
 
     OnDisconnected();
 }
+
+
 
 } // namespace LibNetworks::Sessions

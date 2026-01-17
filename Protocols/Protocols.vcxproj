@@ -36,11 +36,15 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Commons.grpc.pb.cc" />
     <ClCompile Include="Commons.pb.cc" />
+    <ClCompile Include="Tests.grpc.pb.cc" />
     <ClCompile Include="Tests.pb.cc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Commons.grpc.pb.h" />
     <ClInclude Include="Commons.pb.h" />
+    <ClInclude Include="Tests.grpc.pb.h" />
     <ClInclude Include="Tests.pb.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
@@ -141,6 +145,7 @@
       <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -176,6 +181,7 @@
       <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
     </ClCompile>
     <Link>
       <SubSystem>

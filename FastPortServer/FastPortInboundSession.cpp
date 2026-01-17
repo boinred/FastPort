@@ -3,6 +3,9 @@
 #include <utility>
 #include <spdlog/spdlog.h>
 #include <memory>
+#include <Protocols/Commons.pb.h>
+#include <Protocols/Tests.pb.h>
+
 
 module fastport_inbound_session;
 import commons.logger;
@@ -17,6 +20,12 @@ FastPortInboundSession::FastPortInboundSession(const std::shared_ptr<LibNetworks
     : LibNetworks::Sessions::InboundSession(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer))
 {
 
+}
+
+FastPortInboundSession::~FastPortInboundSession()
+{
+
+    LibCommons::Logger::GetInstance().LogInfo("FastPortInboundSession", "Destructor called. Session Id : {}", GetSessionId());
 }
 
 void FastPortInboundSession::OnAccepted()
@@ -36,17 +45,36 @@ void FastPortInboundSession::OnDisconnected()
     sessions.Remove(GetSessionId());
 }
 
-void FastPortInboundSession::OnReceive(const char* pData, size_t dataLength)
+void FastPortInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPacket)
 {
-    __super::OnReceive(pData, dataLength);
+    __super::OnPacketReceived(rfPacket);
 
-    LibCommons::Logger::GetInstance().LogInfo("FastPortInboundSession", "OnReceive. Session Id : {}, Data Length : {}", GetSessionId(), dataLength);
+    LibCommons::Logger::GetInstance().LogInfo("FastPortInboundSession", "OnReceive. Session Id : {}, Data Length : {}", GetSessionId(), rfPacket.GetPacketSize());
 
-    SendBuffer(pData, dataLength);
+    __super::OnPacketReceived(rfPacket);
+
+    // Process the received packet
+    const auto packetId = rfPacket.GetPacketId();
+
+    ::fastport::protocols::tests::EchoRequest request;
+    if (!rfPacket.ParseMessage(request))
+    {
+        LibCommons::Logger::GetInstance().LogError("FastPortOutboundSession", "OnReceive, Failed to parse EchoRequest. Session Id : {}, Packet Id : {}", GetSessionId(), packetId);
+        return;
+    }
+
+    ::fastport::protocols::tests::EchoResponse response;
+    auto pHeader = response.mutable_header();
+    pHeader->set_request_id(request.header().request_id() + 1);
+    pHeader->set_timestamp_ms(static_cast<uint64_t>(time(nullptr)));
+    response.set_result(::fastport::protocols::commons::ResultCode::RESULT_CODE_OK);
+    response.set_data_str(request.data_str());
+    SendMessage(::fastport::protocols::commons::ProtocolId::PROTOCOL_ID_TESTS, response);
+
+    LibCommons::Logger::GetInstance().LogInfo("FastPortOutboundSession", "OnReceive, SendBuffer, Session Id : {}, Packet Id: {}, Request Id : {}", GetSessionId(), packetId, request.header().request_id());
 }
 
 void FastPortInboundSession::OnSent(size_t bytesSent)
 {
     __super::OnSent(bytesSent);
 }
- 

@@ -32,6 +32,7 @@
     <ClCompile Include="IOSocketListener.ixx" />
     <ClCompile Include="OutboundSession.cpp" />
     <ClCompile Include="OutboundSession.ixx" />
+    <ClCompile Include="Packet.ixx" />
     <ClCompile Include="Socket.cpp" />
     <ClCompile Include="Socket.ixx" />
   </ItemGroup>

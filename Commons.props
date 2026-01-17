@@ -5,6 +5,7 @@
   <PropertyGroup>
     <IntDir>$(SolutionDir)\_Intermediate\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <OutDir>$(SolutionDir)\_Builds\$(Platform)\$(Configuration)\</OutDir>
+    <PublicIncludeDirectories>$(SolutionDir);$(PublicIncludeDirectories)</PublicIncludeDirectories>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -15,6 +16,7 @@
       <PrecompiledHeaderFile />
       <PrecompiledHeaderOutputFile />
       <EnableModules>false</EnableModules>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
     </ClCompile>
     <PreBuildEvent>
       <Command>

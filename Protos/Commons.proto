@@ -4,6 +4,12 @@ package fastport.protocols.commons;
 
 option optimize_for = SPEED;
 
+enum ProtocolId 
+{
+	PROTOCOL_ID_UNSPECIFIED = 0;
+	PROTOCOL_ID_TESTS		= 1;
+}
+
 // Basic test-purpose protocol definitions.
 
 enum ResultCode {

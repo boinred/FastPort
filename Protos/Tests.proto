@@ -15,20 +15,22 @@ message PingResponse
 {
 	commons.Header		header	= 1;
 	commons.ResultCode	result	= 2;
-	string		payload = 3;
+	string				payload = 3;
 }
 
 message EchoRequest 
 {
-	commons.Header	header	= 1;
-	bytes	data	= 2;
+	commons.Header	header		= 1;
+	bytes			data		= 2;
+	string			data_str	= 3; // For convenience, allow string data as well.
 }
 
 message EchoResponse 
 {
-	commons.Header		header = 1;
-	commons.ResultCode	result = 2;
-	bytes				data = 3;
+	commons.Header		header		= 1;
+	commons.ResultCode	result		= 2;
+	bytes				data		= 3;
+	string				data_str	= 4; // For convenience, allow string data as well.
 }
 
 message ErrorResponse 

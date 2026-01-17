@@ -4,6 +4,9 @@
     <Filter Include="Protos">
       <UniqueIdentifier>{d5cb0fa8-b902-4e5a-8f32-cb64eeecde95}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Grpcs">
+      <UniqueIdentifier>{1c318350-b797-456e-ab4a-8025b832487a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\Protos\Tests.proto">
@@ -16,9 +19,21 @@
   <ItemGroup>
     <ClCompile Include="Commons.pb.cc" />
     <ClCompile Include="Tests.pb.cc" />
+    <ClCompile Include="Commons.grpc.pb.cc">
+      <Filter>Grpcs</Filter>
+    </ClCompile>
+    <ClCompile Include="Tests.grpc.pb.cc">
+      <Filter>Grpcs</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Commons.pb.h" />
     <ClInclude Include="Tests.pb.h" />
+    <ClInclude Include="Commons.grpc.pb.h">
+      <Filter>Grpcs</Filter>
+    </ClInclude>
+    <ClInclude Include="Tests.grpc.pb.h">
+      <Filter>Grpcs</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

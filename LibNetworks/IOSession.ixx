@@ -5,10 +5,13 @@
 #include <atomic>
 #include <WinSock2.h>
 
+#include <google/protobuf/message.h>
+
 export module networks.sessions.io_session;
 
 import networks.core.io_consumer;
 import networks.core.socket;
+import networks.core.packet;
 import commons.buffers.ibuffer;
 
 namespace LibNetworks::Sessions
@@ -38,21 +41,13 @@ public:
     // Connect 완료 이벤트 처리 훅.
     virtual void OnConnected() {}
 
-    // 연결 종료 이벤트 처리 훅.
-    virtual void OnDisconnected() {}
-
-    // 수신 데이터 처리 훅.
-    virtual void OnReceive(const char* pData, size_t dataLength) {}
-    // 송신 완료 처리 훅.
-    virtual void OnSent(size_t bytesSent) {}
-
-    // 송신 큐 적재 및 비동기 송신 트리거.
-    void SendBuffer(const char* pData, size_t dataLength);
-
-    
-
+    void SendMessage(const short packetId, const google::protobuf::Message& rfMessage);
 
 protected:
+
+    // 연결 종료 이벤트 처리
+    virtual void OnDisconnected() {}
+
     // 지속 수신을 위한 Recv 재등록.
     void RequestReceived();
 
@@ -62,9 +57,18 @@ protected:
     // IOCP 완료 통지 처리 진입점.
     virtual void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
 
+    // 수신 데이터 처리
+    virtual void OnPacketReceived(const Core::Packet& rfPacket) {}
+
+    // 송신 완료 처리
+    virtual void OnSent(size_t bytesSent) {}
+
 private:
+    // 송신 큐 적재 및 비동기 송신 트리거.
+    void SendBuffer(const unsigned char* pData, size_t dataLength);
 
     void ReadReceivedBuffers();
+    void ProcessReceiveQueue();
 
     // IOCP용 OVERLAPPED 확장 컨텍스트.
     struct OverlappedEx

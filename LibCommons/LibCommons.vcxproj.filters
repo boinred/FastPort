@@ -16,6 +16,7 @@
       <Filter>Buffers</Filter>
     </ClCompile>
     <ClCompile Include="Container.ixx" />
+    <ClCompile Include="EventListener.ixx" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Buffers">

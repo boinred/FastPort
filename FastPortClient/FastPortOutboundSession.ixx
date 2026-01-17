@@ -4,6 +4,7 @@ export module fastport_outbound_session;
 
 import networks.sessions.outbound_session;
 import commons.buffers.ibuffer;
+import networks.core.packet;
 
 export class FastPortOutboundSession : public LibNetworks::Sessions::OutboundSession
 {
@@ -26,7 +27,7 @@ public:
     void OnDisconnected() override;
 
 
-    void OnReceive(const char* pData, size_t dataLength) override;
+    void OnPacketReceived(const LibNetworks::Core::Packet& rfPacket) override;
 
 
     void OnSent(size_t bytesSent) override;
