@@ -245,7 +245,7 @@ void IOSession::ProcessReceiveQueue()
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
-    while (true)
+    for (;;)
     {
         const size_t canRead = m_pReceiveBuffer ? m_pReceiveBuffer->CanReadSize() : 0;
         if (canRead < Core::Packet::GetHeaderSize())
@@ -285,11 +285,9 @@ void IOSession::ProcessReceiveQueue()
             return;
         }
 
-        // OnPacketReceived(Core::Packet(std::move(buffers)));
-        auto self = shared_from_this();
-        LibCommons::EventListener::GetInstance().PostTask([self, buffers = std::move(buffers)]() mutable
+        LibCommons::EventListener::GetInstance().PostTask([ptr = shared_from_this(), buffers = std::move(buffers)]() mutable
             {
-                self->OnPacketReceived(Core::Packet(std::move(buffers)));
+                ptr->OnPacketReceived(Core::Packet(std::move(buffers)));
             });
     }
 }
