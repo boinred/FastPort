@@ -42,7 +42,7 @@ public:
     // Connect 완료 이벤트 처리 훅.
     virtual void OnConnected() {}
 
-    void SendMessage(const short packetId, const google::protobuf::Message& rfMessage);
+    void SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage);
 
 protected:
 
@@ -69,7 +69,6 @@ private:
     void SendBuffer(const unsigned char* pData, size_t dataLength);
 
     void ReadReceivedBuffers();
-    void ProcessReceiveQueue();
 
     // IOCP용 OVERLAPPED 확장 컨텍스트.
     struct OverlappedEx

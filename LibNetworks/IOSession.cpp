@@ -47,7 +47,7 @@ void IOSession::SendBuffer(const unsigned char* pData, size_t dataLength)
     TryPostSendFromQueue();
 }
 
-void IOSession::SendMessage(const short packetId, const google::protobuf::Message& rfMessage)
+void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage)
 {
     std::ostringstream os;
     rfMessage.SerializePartialToOstream(&os);

@@ -34,8 +34,8 @@ public:
             return std::nullopt;
         }
 
-        const auto packetSize = Packet::GetHeaderFromBuffer(header);
-        if (packetSize <= 0)
+        const uint16_t packetSize = Packet::GetHeaderFromBuffer(header);
+        if (packetSize < Packet::GetHeaderSize() + Packet::GetPacketIdSize())
         {
             return std::nullopt;
         }
