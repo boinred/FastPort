@@ -13,6 +13,7 @@ import networks.core.socket;
 import networks.services.io_service;
 import networks.core.io_socket_connector;
 import networks.sessions.outbound_session;
+import commons.event_listener;
 import fastport_outbound_session;
 
 int main()
@@ -37,6 +38,8 @@ int main()
     logger.Create(location + "/" + "loggers", fileName, 1024 * 1024 * 10, 3, bServiceMode);
 
     LibNetworks::Core::Socket::Initialize();
+
+    LibCommons::EventListener::GetInstance().Init(std::thread::hardware_concurrency());
 
     auto pIOService = std::make_shared<LibNetworks::Services::IOService>();
     pIOService->Start(std::thread::hardware_concurrency() * 2);

@@ -31,6 +31,7 @@
     <ClCompile Include="SingleTon.ixx" />
     <ClCompile Include="Container.ixx" />
     <ClCompile Include="StrConverter.ixx" />
+    <ClCompile Include="ThreadPool.ixx" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>

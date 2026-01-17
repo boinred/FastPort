@@ -24,7 +24,6 @@ FastPortInboundSession::FastPortInboundSession(const std::shared_ptr<LibNetworks
 
 FastPortInboundSession::~FastPortInboundSession()
 {
-
     LibCommons::Logger::GetInstance().LogInfo("FastPortInboundSession", "Destructor called. Session Id : {}", GetSessionId());
 }
 

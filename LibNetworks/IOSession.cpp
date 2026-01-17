@@ -12,6 +12,7 @@
 module networks.sessions.io_session;
 import commons.logger;
 import networks.core.packet;
+import commons.event_listener;
 
 namespace LibNetworks::Sessions
 {
@@ -274,14 +275,6 @@ void IOSession::ProcessReceiveQueue()
             return; // wait for more data
         }
 
-        //// Consume header
-        //if (!m_pReceiveBuffer->Consume(Core::Packet::HeaderSize))
-        //{
-        //    logger.LogError("IOSession", "ProcessReceiveQueue() Consume header failed. Session Id : {}", GetSessionId());
-        //    RequestDisconnect();
-        //    return;
-        //}
-
         std::vector<unsigned char> buffers;
         buffers.resize(bufferSize);
 
@@ -292,9 +285,12 @@ void IOSession::ProcessReceiveQueue()
             return;
         }
 
-        const Core::Packet receivedPacket(std::move(buffers));
-
-        OnPacketReceived(receivedPacket);
+        // OnPacketReceived(Core::Packet(std::move(buffers)));
+        auto self = shared_from_this();
+        LibCommons::EventListener::GetInstance().PostTask([self, buffers = std::move(buffers)]() mutable
+            {
+                self->OnPacketReceived(Core::Packet(std::move(buffers)));
+            });
     }
 }
 

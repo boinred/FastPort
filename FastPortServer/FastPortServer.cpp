@@ -4,8 +4,10 @@
 #include <iostream>
 #include <filesystem>
 #include <spdlog/spdlog.h>
+#include <thread>
 
 import commons.logger; 
+import commons.event_listener; 
 import networks.core.socket;
 
 import fastport_service_mode;
@@ -32,6 +34,8 @@ int main(int argc, const char* argv[])
     logger.Create(location + "/" + "loggers", fileName, 1024 * 1024 * 10, 3, bServiceMode);
 
     LibNetworks::Core::Socket::Initialize();
+
+    LibCommons::EventListener::GetInstance().Init(std::thread::hardware_concurrency());
 
     std::shared_ptr<FastPortServiceMode>  pServiceMode = std::make_shared<FastPortServiceMode>();
     pServiceMode->Execute(argc, argv);
