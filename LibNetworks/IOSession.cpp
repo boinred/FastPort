@@ -285,7 +285,7 @@ void IOSession::ProcessReceiveQueue()
             return;
         }
 
-        LibCommons::EventListener::GetInstance().PostTask([ptr = shared_from_this(), buffers = std::move(buffers)]() mutable
+        LibCommons::EventListener::GetInstance().Enqueue([ptr = shared_from_this(), buffers = std::move(buffers)]() mutable
             {
                 ptr->OnPacketReceived(Core::Packet(std::move(buffers)));
             });

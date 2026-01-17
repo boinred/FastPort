@@ -56,6 +56,11 @@ public:
         m_Condition.notify_all();
     }
 
+    bool IsStopped() const
+    {
+        return m_bStopped.load();
+    }
+
 private:
     void WorkerThread(std::stop_token stoken)
     {
