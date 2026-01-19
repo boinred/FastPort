@@ -1,136 +1,276 @@
 ﻿# FastPort
 
-FastPort는 Windows IOCP 기반으로 구현한 C++ 네트워크 서버/클라이언트 샘플 프로젝트입니다. C++20 모듈(`.ixx`)을 사용하며, 세션/IOCP/버퍼/로깅을 라이브러리 형태로 분리해두었습니다.
+**고성능 Windows IOCP 기반 비동기 네트워크 프레임워크**
 
-> 저장소 브랜치/코드는 개발 중이며, 기능은 점진적으로 확장되는 형태입니다.
-
----
-
-## 주요 목표
-
-- IOCP 기반 비동기 네트워킹 학습/실험
-- Listener(Accept) / Connector(Connect) / Session(Send/Recv) 레이어 분리
-- 송수신 버퍼를 인터페이스(`IBuffer`)로 분리하고 구현(`CircleBufferQueue`)을 교체 가능하도록 구성
-- spdlog 기반 로깅
+C++20 모듈을 활용하여 구현한 확장 가능한 네트워크 서버/클라이언트 라이브러리입니다.
 
 ---
 
-## 프로젝트 구조
+## 🎯 프로젝트 개요
 
-대략적인 디렉터리 구성은 아래와 같습니다.
+| 항목 | 내용 |
+|------|------|
+| **목적** | IOCP 기반 고성능 비동기 네트워킹 프레임워크 설계 및 구현 |
+| **유형** | 개인 프로젝트 |
+| **개발 환경** | Windows, Visual Studio 2022+, C++20 |
+
+---
+
+## 🛠 기술 스택
+
+| 분류 | 기술 |
+|------|------|
+| **언어** | C++20 (Modules `.ixx`) |
+| **비동기 I/O** | Windows IOCP (I/O Completion Port) |
+| **네트워크** | Winsock2, AcceptEx, ConnectEx, WSARecv, WSASend |
+| **직렬화** | Protocol Buffers (protobuf), gRPC |
+| **로깅** | spdlog |
+| **동기화** | SRWLock, atomic |
+| **패키지 관리** | vcpkg |
+| **테스트** | Microsoft C++ Unit Test Framework |
+
+---
+
+## 🏗 아키텍처
+
+```mermaid
+graph TB
+    subgraph Application["Application Layer"]
+        Server[FastPortServer]
+        Client[FastPortClient]
+    end
+
+    subgraph Session["Session Layer"]
+        Inbound[InboundSession]
+        Outbound[OutboundSession]
+    end
+
+    subgraph Network["Network Core Layer"]
+        Listener[IOSocketListener<br/>AcceptEx]
+        Connector[IOSocketConnector<br/>ConnectEx]
+        IOSession[IOSession<br/>WSARecv/WSASend]
+        Framer[PacketFramer]
+        Packet[Packet]
+    end
+
+    subgraph IOCP["IOCP Service Layer"]
+        IOService[IOService<br/>Worker Thread Pool]
+        Consumer[IIOConsumer]
+    end
+
+    subgraph Common["Common Layer"]
+        Buffer[IBuffer / CircleBufferQueue]
+        Logger[Logger]
+        Lock[RWLock]
+        ThreadPool[ThreadPool]
+        EventListener[EventListener]
+    end
+
+    Server --> Inbound
+    Client --> Outbound
+    Inbound --> IOSession
+    Outbound --> IOSession
+    Listener --> Inbound
+    Connector --> Outbound
+    IOSession --> Framer
+    Framer --> Packet
+    IOSession --> IOService
+    Listener --> IOService
+    Connector --> IOService
+    IOService --> Consumer
+    IOSession --> Buffer
+    IOSession --> EventListener
+    EventListener --> ThreadPool
+```
+
+---
+
+## 📦 패킷 프로토콜
+
+```mermaid
+packet-beta
+    0-15: "Packet Size (2 bytes, Network Byte Order)"
+    16-31: "Packet ID (2 bytes, Network Byte Order)"
+    32-95: "Payload (N bytes, Protobuf Serialized)"
+```
+
+| 필드 | 크기 | 설명 |
+|------|------|------|
+| **Size** | 2 bytes | 전체 패킷 크기 (헤더 포함), Big-Endian |
+| **Packet ID** | 2 bytes | 메시지 타입 식별자, Big-Endian |
+| **Payload** | N bytes | Protocol Buffers 직렬화 데이터 |
+
+---
+
+## 📁 프로젝트 구조
 
 ```
 FastPort/
-├─ FastPortServer/                 # 서버 실행 파일
-│  ├─ FastPortServer.cpp           # 서버 main
-│  ├─ FastPortServiceMode.ixx      # 서비스 모드(시작/종료/Shutdown) + 리스너 구동
-│  ├─ FastPortInboundSession.*     # 서버 Inbound 세션 샘플
+├─ FastPortServer/           # 서버 애플리케이션
+│  ├─ FastPortServer.cpp
+│  ├─ FastPortServiceMode.ixx
+│  └─ FastPortInboundSession.*
 │
-├─ FastPortClient/                 # 클라이언트 실행 파일
-│  ├─ FastPortClient.cpp           # 클라이언트 main
-│  ├─ FastPortOutboundSession.*    # 클라이언트 Outbound 세션 샘플
+├─ FastPortClient/           # 클라이언트 애플리케이션
+│  ├─ FastPortClient.cpp
+│  └─ FastPortOutboundSession.*
 │
-├─ LibNetworks/                    # 네트워크 라이브러리(IOCP 코어)
-│  ├─ Socket.*                     # Winsock Socket 래퍼
-│  ├─ IOService.*                  # IOCP 워커 스레드/Completion dispatch
-│  ├─ IOConsumer.ixx               # IOCP completion 대상 인터페이스
-│  ├─ IOSocketListener.*           # AcceptEx 기반 Listener
-│  ├─ IOSocketConnector.*          # ConnectEx 기반 Connector
-│  ├─ IOSession.*                  # 세션(WSARecv/WSASend) + 송수신 큐
-│  ├─ InboundSession.*             # Accept로 생성되는 세션 베이스
-│  └─ OutboundSession.*            # Connect로 생성되는 세션 베이스
+├─ LibNetworks/              # 네트워크 코어 라이브러리
+│  ├─ Socket.*               # Winsock 소켓 래퍼
+│  ├─ IOService.*            # IOCP 워커 스레드 관리
+│  ├─ IOConsumer.ixx         # IOCP Completion 인터페이스
+│  ├─ IOSocketListener.*     # AcceptEx 기반 리스너
+│  ├─ IOSocketConnector.*    # ConnectEx 기반 커넥터
+│  ├─ IOSession.*            # 세션 I/O 처리
+│  ├─ Packet.ixx             # 패킷 구조체
+│  ├─ PacketFramer.ixx       # TCP 스트림 패킷 분리
+│  ├─ InboundSession.*       # 서버 세션 베이스
+│  └─ OutboundSession.*      # 클라이언트 세션 베이스
 │
-├─ LibCommons/                     # 공용 유틸 라이브러리
-│  ├─ Logger.*                     # spdlog 래핑
-│  ├─ RWLock.*                     # SRWLock 기반 RWLock
-│  ├─ ServiceMode.*                # Windows Service/콘솔 모드 추상화
-│  ├─ IBuffer.ixx                  # 송수신 버퍼 인터페이스
-│  └─ CircleBufferQueue.ixx        # 원형 버퍼 큐(IBuffer 구현)
+├─ LibCommons/               # 공용 유틸리티 라이브러리
+│  ├─ Logger.*               # spdlog 래핑
+│  ├─ RWLock.*               # SRWLock 기반 동기화
+│  ├─ ThreadPool.ixx         # 스레드 풀
+│  ├─ EventListener.ixx      # 이벤트 리스너 (작업 큐)
+│  ├─ IBuffer.ixx            # 버퍼 인터페이스
+│  └─ CircleBufferQueue.ixx  # 원형 버퍼 구현체
 │
-├─ LibCommonsTests/                # 공용 라이브러리 테스트
-│  └─ CircleBufferQueueTests.cpp
-└─ LibNetworksTests/               # 네트워크 라이브러리 테스트(뼈대)
-   └─ LibNetworksTests.cpp
+├─ Protocols/                # Protocol Buffers 생성 파일
+│  └─ *.pb.h, *.pb.cc
+│
+├─ Protos/                   # .proto 정의 파일
+│  ├─ Commons.proto
+│  └─ Tests.proto
+│
+└─ Tests/                    # 단위 테스트
+   ├─ LibCommonsTests/
+   └─ LibNetworksTests/
 ```
 
 ---
 
-## 주요 기능 요약
+## ✨ 핵심 구현 내용
 
-### 1) IOCP 기반 비동기 처리
-- `LibNetworks::Services::IOService`
-  - IOCP 생성/워크 스레드 실행
-  - completion 이벤트를 `IIOConsumer::OnIOCompleted(...)`로 전달
+### 1. IOCP 기반 비동기 I/O 처리
 
-- `LibNetworks::Core::IIOConsumer`
-  - IOCP completion callback을 받는 인터페이스
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant IO as IOService
+    participant IOCP as IOCP Kernel
+    participant Worker as Worker Thread
 
-### 2) AcceptEx 기반 서버 리스너
-- `LibNetworks::Core::IOSocketListener`
-  - `AcceptEx`로 비동기 accept
-  - accept 완료 시 사용자 콜백으로 `InboundSession` 생성
+    App->>IO: Start(numThreads)
+    IO->>IOCP: CreateIoCompletionPort()
+    loop Worker Threads
+        IO->>Worker: spawn thread
+        Worker->>IOCP: GetQueuedCompletionStatus()
+        IOCP-->>Worker: Completion Event
+        Worker->>App: OnIOCompleted()
+    end
+```
 
-### 3) ConnectEx 기반 클라이언트 커넥터
-- `LibNetworks::Core::IOSocketConnector`
-  - `ConnectEx`로 비동기 connect
-  - connect 완료 시 사용자 콜백으로 `OutboundSession` 생성
+- `IOService`: IOCP 핸들 생성 및 워커 스레드 풀 관리
+- `IIOConsumer`: Completion 이벤트 콜백 인터페이스로 확장성 확보
+- 하드웨어 동시성 기반 스레드 수 자동 조정
 
-### 4) 세션 레이어 (WSARecv/WSASend)
-- `LibNetworks::Sessions::IOSession`
-  - `WSARecv`/`WSASend`를 IOCP 방식으로 post
-  - Recv/Send는 멤버 `OVERLAPPED`를 재사용(힙 할당 최소화)
-  - Send는 `m_SendInProgress`로 outstanding 1개만 유지
-  - Send/Recv 버퍼 정책은 `IBuffer`로 분리(의존성 주입)
+### 2. 비동기 Accept/Connect
 
-### 5) 버퍼 추상화
-- `LibCommons::Buffers::IBuffer`
-  - `Write/Peek/Consume` 기반의 송수신 큐 인터페이스
+- **AcceptEx**: Pre-posted accept로 연결 수락 지연 최소화
+- **ConnectEx**: 비동기 연결로 블로킹 없는 클라이언트 구현
 
-- `LibCommons::Buffers::CircleBufferQueue`
-  - 원형 버퍼 기반 구현체
-  - 내부 동기화를 위해 `RWLock` 사용
+### 3. 세션 관리 및 메모리 최적화
 
-### 6) 로깅
-- `LibCommons::Logger`
-  - spdlog 래핑
-  - 카테고리 기반 로깅
+- `OVERLAPPED` 구조체 멤버 변수 재사용으로 힙 할당 최소화
+- `m_SendInProgress` atomic 플래그로 동시 전송 1개 유지 (순차 전송 보장)
+- Send/Recv 버퍼를 인터페이스(`IBuffer`)로 분리하여 DI 패턴 적용
 
----
+### 4. TCP 스트림 패킷 프레이밍
 
-## 실행 흐름(개략)
+```mermaid
+stateDiagram-v2
+    [*] --> WaitHeader: 데이터 수신
+    WaitHeader --> WaitHeader: canRead < 4
+    WaitHeader --> ValidateHeader: canRead >= 4
+    ValidateHeader --> Invalid: size < 4 or size > MAX
+    ValidateHeader --> WaitPayload: size valid
+    WaitPayload --> WaitPayload: canRead < packetSize
+    WaitPayload --> ParsePacket: canRead >= packetSize
+    ParsePacket --> OnPacketReceived: Packet 생성
+    OnPacketReceived --> WaitHeader: 다음 패킷
+    Invalid --> Disconnect: 연결 종료
+```
 
-### 서버
-1. `FastPortServer.cpp`에서 초기화(로깅/Winsock)
-2. `FastPortServiceMode` 실행
-3. `FastPortServiceMode::OnStarted()`에서 `IOSocketListener::Create(...)`
-4. accept 완료 시 `FastPortInboundSession` 생성 후 `OnAccepted()` 호출
+- `PacketFramer`: TCP 스트림에서 패킷 단위 분리
+- `PacketFrameResult`: `Ok` / `NeedMore` / `Invalid` 3상태 분리
+- Network Byte Order (Big-Endian) 헤더 처리 (`htons`/`ntohs`)
 
-### 클라이언트
-1. `FastPortClient.cpp`에서 초기화(로깅/Winsock)
-2. `IOService` 시작
-3. `IOSocketConnector::Create(...)`로 비동기 connect
-4. connect 완료 시 `FastPortOutboundSession` 생성 후 `OnConnected()` 호출
+### 5. 원형 버퍼 큐 (CircleBufferQueue)
 
----
+- `Write/Peek/Pop/Consume` 기반 스트림 처리
+- `RWLock`을 통한 스레드 안전성 보장
+- 메모리 재할당 없이 연속적인 데이터 처리
 
-## 빌드/개발 환경
+### 6. 계층 분리 설계
 
-- Windows (IOCP/Winsock2 사용)
-- Visual Studio
-- C++20 Modules (`.ixx`)
-- 테스트: Microsoft C++ Unit Test Framework
-
----
-
-## 확장 아이디어
-
-- 패킷 프레이밍(길이 헤더 기반) + `m_pReceiveBuffer` 누적 파서
-- Send zero-copy 개선(IBuffer에 segment/WSABUF view 제공)
-- 세션 매니저/컨테이너(멀티 세션 추적, 브로드캐스트)
-- graceful shutdown(소켓 close + pending IO cancel + 세션 정리)
+| 계층 | 역할 | 주요 클래스 |
+|------|------|------------|
+| Application | 비즈니스 로직 | `FastPortServer`, `FastPortClient` |
+| Session | 세션 상태 관리 | `InboundSession`, `OutboundSession` |
+| Network Core | I/O 처리 | `IOSession`, `PacketFramer`, `Packet` |
+| IOCP Service | 스레드 관리 | `IOService`, `IIOConsumer` |
+| Common | 공용 유틸 | `IBuffer`, `Logger`, `ThreadPool` |
 
 ---
 
-## 라이선스
+## 🔧 빌드 및 실행
 
-저장소의 라이선스 정책을 따릅니다.
+### 요구 사항
+
+- Windows 10 이상
+- Visual Studio 2022 이상
+- C++20 지원 컴파일러
+- vcpkg (패키지 관리)
+
+### 의존성 설치
+
+```bash
+vcpkg install spdlog:x64-windows
+vcpkg install protobuf:x64-windows
+vcpkg install grpc:x64-windows
+```
+
+### 빌드
+
+1. `FastPort.slnx` 솔루션 파일 열기
+2. 빌드 구성 선택 (Debug/Release, x64)
+3. 솔루션 빌드 (Ctrl+Shift+B)
+
+### 실행
+
+```powershell
+# 서버 실행
+.\FastPortServer.exe
+
+# 클라이언트 실행 (별도 터미널)
+.\FastPortClient.exe
+```
+
+---
+
+## 📊 기술적 의사결정
+
+| 결정 사항 | 선택 | 이유 |
+|-----------|------|------|
+| 비동기 모델 | IOCP | Windows 환경 최고 성능의 비동기 I/O 모델 |
+| 모듈 시스템 | C++20 Modules | 컴파일 시간 단축, 명확한 인터페이스 분리 |
+| 버퍼 설계 | 원형 버퍼 + 인터페이스 | 메모리 효율성 및 구현체 교체 용이성 |
+| 패킷 엔디안 | Network Byte Order | 플랫폼 독립적 통신, 표준 준수 |
+| 동기화 | SRWLock + atomic | 읽기 작업 빈번 시 성능 우위, lock-free 패턴 |
+| 직렬화 | Protocol Buffers | 언어 중립적, 효율적인 바이너리 직렬화 |
+
+---
+
+## 📝 License
+
+MIT License
