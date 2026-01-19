@@ -1,0 +1,5 @@
+root = true
+
+# 모든 파일에 대해 적용
+[*]
+charset = utf-8-bom

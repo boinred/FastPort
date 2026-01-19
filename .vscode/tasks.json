@@ -1,0 +1,76 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-debug-x64",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "FastPort.slnx",
+                "/p:Configuration=Debug",
+                "/p:Platform=x64",
+                "/p:BuildProjectReferences=true"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "silent",
+                "clear": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "build-release-x64",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "FastPort.slnx",
+                "/p:Configuration=Release",
+                "/p:Platform=x64",
+                "/p:BuildProjectReferences=true"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "silent",
+                "clear": true
+            },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "clean-debug-x64",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "FastPort.slnx",
+                "/t:Clean",
+                "/p:Configuration=Debug",
+                "/p:Platform=x64"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "silent",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "clean-release-x64",
+            "type": "shell",
+            "command": "msbuild",
+            "args": [
+                "FastPort.slnx",
+                "/t:Clean",
+                "/p:Configuration=Release",
+                "/p:Platform=x64"
+            ],
+            "group": "build",
+            "presentation": {
+                "reveal": "silent",
+                "clear": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}

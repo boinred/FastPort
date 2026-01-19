@@ -1,5 +1,8 @@
-{
+﻿{
   "dependencies": [
-    "spdlog"
+    "spdlog",
+    "cxxopts",
+    "protobuf",
+    "grpc"
   ]
 }

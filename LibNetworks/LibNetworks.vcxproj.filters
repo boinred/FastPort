@@ -1,13 +1,67 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="소스 파일">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    <Filter Include="Services">
+      <UniqueIdentifier>{7fb362a3-2eee-4ab8-90bc-56a474c3b5e0}</UniqueIdentifier>
     </Filter>
-    <Filter Include="리소스 파일">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    <Filter Include="Core">
+      <UniqueIdentifier>{03ae3d37-8240-4b6a-819c-e37b08f42238}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Sessions">
+      <UniqueIdentifier>{3febb513-d5c5-4f29-ac9e-021d670acd72}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="IOService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="IOService.ixx">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="IOSocketConnector.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="IOSocketListener.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="IOSocketListener.ixx">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="IOSocketConnector.ixx">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="OutboundSession.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="IOSession.cpp">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="IOSession.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="OutboundSession.cpp">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="InboundSession.cpp">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="InboundSession.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="IOConsumer.ixx">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Socket.cpp">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Socket.ixx">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="PacketFramer.ixx">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Packet.ixx">
+      <Filter>Core</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

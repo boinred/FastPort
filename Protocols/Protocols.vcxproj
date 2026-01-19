@@ -19,25 +19,39 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CircleBufferQueue.ixx" />
-    <ClCompile Include="EventListener.ixx" />
-    <ClCompile Include="IBuffer.ixx" />
-    <ClCompile Include="Logger.cpp" />
-    <ClCompile Include="Logger.ixx" />
-    <ClCompile Include="RWLock.cpp" />
-    <ClCompile Include="RWLock.ixx" />
-    <ClCompile Include="ServiceMode.cpp" />
-    <ClCompile Include="ServiceMode.ixx" />
-    <ClCompile Include="SingleTon.ixx" />
-    <ClCompile Include="Container.ixx" />
-    <ClCompile Include="StrConverter.ixx" />
-    <ClCompile Include="ThreadPool.ixx" />
+    <CustomBuild Include="..\Protos\Commons.proto">
+      <DeploymentContent>true</DeploymentContent>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</DeploymentContent>
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</DeploymentContent>
+    </CustomBuild>
+    <CustomBuild Include="..\Protos\Tests.proto">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</DeploymentContent>
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</DeploymentContent>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Commons.grpc.pb.cc" />
+    <ClCompile Include="Commons.pb.cc" />
+    <ClCompile Include="Tests.grpc.pb.cc" />
+    <ClCompile Include="Tests.pb.cc" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Commons.grpc.pb.h" />
+    <ClInclude Include="Commons.pb.h" />
+    <ClInclude Include="Tests.grpc.pb.h" />
+    <ClInclude Include="Tests.pb.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{4f7088d5-e65b-4b71-97bf-91019bb758c5}</ProjectGuid>
-    <RootNamespace>LibCommons</RootNamespace>
+    <ProjectGuid>{17dbf54e-3460-402c-a2b0-75ff9cbabcbd}</ProjectGuid>
+    <RootNamespace>Protocols</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -74,13 +88,9 @@
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="..\Commons.props" />
-    <Import Project="..\Application.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="..\Commons.props" />
-    <Import Project="..\Application.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -133,12 +143,34 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
     </ClCompile>
     <Link>
       <SubSystem>
       </SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Command>$(SolutionDir)\vcpkg_installed\x64-windows\x64-windows\tools\protobuf\protoc --version
+</Command>
+      <Message>Protoc version : </Message>
+    </PreBuildEvent>
+    <CustomBuildStep>
+      <Command>
+      </Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>
+      </Message>
+    </CustomBuildStep>
+    <CustomBuild />
+    <CustomBuild>
+      <Message>Protobuf Build %(FullPath)</Message>
+      <Outputs>$(ProjectDir)%(Filename).pb.h;$(ProjectDir)%(Filename).pb.cc;$(ProjectDir)%(Filename).grpc.pb.h;$(ProjectDir)%(Filename).grpc.pb.cc</Outputs>
+      <Command>$(SolutionDir)\vcpkg_installed\x64-windows\x64-windows\tools\protobuf\protoc -I=$(SolutionDir)\Protos %(FullPath) --cpp_out=$(ProjectDir) --grpc_out=$(ProjectDir) --plugin=protoc-gen-grpc=$(SolutionDir)\vcpkg_installed\x64-windows\x64-windows\tools\grpc\grpc_cpp_plugin.exe</Command>
+    </CustomBuild>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -147,12 +179,34 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
     </ClCompile>
     <Link>
       <SubSystem>
       </SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Command>$(SolutionDir)\vcpkg_installed\x64-windows\x64-windows\tools\protobuf\protoc --version
+</Command>
+      <Message>Protoc version : </Message>
+    </PreBuildEvent>
+    <CustomBuildStep>
+      <Command>
+      </Command>
+    </CustomBuildStep>
+    <CustomBuildStep>
+      <Message>
+      </Message>
+    </CustomBuildStep>
+    <CustomBuild />
+    <CustomBuild>
+      <Message>Protobuf Build %(FullPath)</Message>
+      <Outputs>$(ProjectDir)%(Filename).pb.h;$(ProjectDir)%(Filename).pb.cc;$(ProjectDir)%(Filename).grpc.pb.h;$(ProjectDir)%(Filename).grpc.pb.cc</Outputs>
+      <Command>$(SolutionDir)\vcpkg_installed\x64-windows\x64-windows\tools\protobuf\protoc -I=$(SolutionDir)\Protos %(FullPath) --cpp_out=$(ProjectDir) --grpc_out=$(ProjectDir) --plugin=protoc-gen-grpc=$(SolutionDir)\vcpkg_installed\x64-windows\x64-windows\tools\grpc\grpc_cpp_plugin.exe</Command>
+    </CustomBuild>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
