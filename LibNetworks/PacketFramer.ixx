@@ -12,37 +12,56 @@ import commons.buffers.ibuffer;
 namespace LibNetworks::Core
 {
 
+export enum class PacketFrameResult
+{
+    Ok,
+    NeedMore,
+    Invalid
+};
+
+export struct PacketFrame
+{
+    PacketFrameResult Result = PacketFrameResult::NeedMore;
+    std::optional<Packet> PacketOpt{};
+};
+
 // TCP 스트림에서 패킷 단위로 분리
 export class PacketFramer
 {
 public:
     PacketFramer() = default;
 
-    // 수신 버퍼에서 완전한 패킷을 꺼내기
-    // RETURN : 패킷 생성 성공 여부
-    std::optional<Packet> TryPop(LibCommons::Buffers::IBuffer& rfReceiveBuffer)
+    PacketFrame TryPop(LibCommons::Buffers::IBuffer& rfReceiveBuffer)
     {
         const size_t canRead = rfReceiveBuffer.CanReadSize();
         if (canRead < Packet::GetHeaderSize())
         {
-            return std::nullopt;
+            return { PacketFrameResult::NeedMore, std::nullopt };
         }
 
         unsigned char header[Packet::GetHeaderSize()]{};
         if (!rfReceiveBuffer.Peek(header, Packet::GetHeaderSize()))
         {
-            return std::nullopt;
+            return { PacketFrameResult::Invalid, std::nullopt };
         }
 
         const uint16_t packetSize = Packet::GetHeaderFromBuffer(header);
-        if (packetSize < Packet::GetHeaderSize() + Packet::GetPacketIdSize())
+        const size_t minPacketSize = Packet::GetHeaderSize() + Packet::GetPacketIdSize();
+
+        if (packetSize < minPacketSize)
         {
-            return std::nullopt;
+            return { PacketFrameResult::Invalid, std::nullopt };
+        }
+
+        // 2 bytes size field => practical upper bound
+        if (packetSize > 0xFFFF)
+        {
+            return { PacketFrameResult::Invalid, std::nullopt };
         }
 
         if (canRead < static_cast<size_t>(packetSize))
         {
-            return std::nullopt;
+            return { PacketFrameResult::NeedMore, std::nullopt };
         }
 
         std::vector<unsigned char> buffers;
@@ -50,10 +69,10 @@ public:
 
         if (!rfReceiveBuffer.Pop(buffers.data(), buffers.size()))
         {
-            return std::nullopt;
+            return { PacketFrameResult::Invalid, std::nullopt };
         }
 
-        return Packet(std::move(buffers));
+        return { PacketFrameResult::Ok, Packet(std::move(buffers)) };
     }
 };
 

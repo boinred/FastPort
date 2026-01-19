@@ -59,7 +59,10 @@ void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Mes
 
 void IOSession::RequestReceived()
 {
-    PostRecv();
+    if (!PostRecv())
+    {
+        RequestDisconnect();
+    }
 }
 
 bool IOSession::PostRecv()
@@ -238,15 +241,31 @@ void IOSession::ReadReceivedBuffers()
         return;
     }
 
+    auto& logger = LibCommons::Logger::GetInstance();
+
     while (true)
     {
-        auto packetOpt = m_PacketFramer.TryPop(*m_pReceiveBuffer);
-        if (!packetOpt.has_value())
+        auto frame = m_PacketFramer.TryPop(*m_pReceiveBuffer);
+        if (frame.Result == Core::PacketFrameResult::NeedMore)
         {
             return;
         }
 
-        OnPacketReceived(*packetOpt);
+        if (frame.Result == Core::PacketFrameResult::Invalid)
+        {
+            logger.LogError("IOSession", "ReadReceivedBuffers() Invalid packet frame. Session Id : {}", GetSessionId());
+            RequestDisconnect();
+            return;
+        }
+
+        if (!frame.PacketOpt.has_value())
+        {
+            logger.LogError("IOSession", "ReadReceivedBuffers() Packet frame ok but packet missing. Session Id : {}", GetSessionId());
+            RequestDisconnect();
+            return;
+        }
+
+        OnPacketReceived(*frame.PacketOpt);
     }
 }
 
