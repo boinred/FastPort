@@ -3,6 +3,15 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Folder Name="/docs/">
+    <File Path="docs/BUILD_GUIDE.md" />
+    <File Path="docs/CPP_MODERN_FEATURES.md" />
+    <File Path="docs/IOCP_ARCHITECTURE.md" />
+    <File Path="docs/MODULE_DEPENDENCIES.md" />
+    <File Path="docs/PACKET_PROTOCOL.md" />
+    <File Path="docs/PROJECT_STRUCTURE.md" />
+    <File Path="docs/README_DOCS.md" />
+  </Folder>
   <Folder Name="/솔루션 항목/">
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
