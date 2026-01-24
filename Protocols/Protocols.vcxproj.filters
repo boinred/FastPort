@@ -15,6 +15,9 @@
     <CustomBuild Include="..\Protos\Commons.proto">
       <Filter>Protos</Filter>
     </CustomBuild>
+    <CustomBuild Include="..\Protos\Benchmark.proto">
+      <Filter>Protos</Filter>
+    </CustomBuild>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Commons.pb.cc" />
@@ -25,6 +28,10 @@
     <ClCompile Include="Tests.grpc.pb.cc">
       <Filter>Grpcs</Filter>
     </ClCompile>
+    <ClCompile Include="Benchmark.pb.cc" />
+    <ClCompile Include="Benchmark.grpc.pb.cc">
+      <Filter>Grpcs</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Commons.pb.h" />
@@ -33,6 +40,10 @@
       <Filter>Grpcs</Filter>
     </ClInclude>
     <ClInclude Include="Tests.grpc.pb.h">
+      <Filter>Grpcs</Filter>
+    </ClInclude>
+    <ClInclude Include="Benchmark.pb.h" />
+    <ClInclude Include="Benchmark.grpc.pb.h">
       <Filter>Grpcs</Filter>
     </ClInclude>
   </ItemGroup>

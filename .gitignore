@@ -411,3 +411,4 @@ vcpkg_installed/
 _Builds/
 
 Protocols/*.pb.*
+/FastPortBenchmark/loggers_benchmark
