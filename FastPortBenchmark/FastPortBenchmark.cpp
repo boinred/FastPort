@@ -193,6 +193,15 @@ void SaveResultsToCsv(const std::string& baseFilename, const std::vector<Benchma
     std::cout << "Results saved to: " << filename << std::endl;
 }
 
+// 디버그 모드에서 키 입력 대기
+void WaitForKeyInDebugMode()
+{
+#ifdef _DEBUG
+    std::cout << "\nPress any key to exit..." << std::endl;
+    std::cin.get();
+#endif
+}
+
 int main(int argc, char* argv[])
 {
     // 명령줄 파싱
@@ -201,6 +210,7 @@ int main(int argc, char* argv[])
     if (args.help)
     {
         CommandLineArgs::PrintUsage();
+        //WaitForKeyInDebugMode();
         return 0;
     }
 
@@ -299,6 +309,7 @@ int main(int argc, char* argv[])
     if (!runner->Start(config, callbacks))
     {
         std::cerr << "Failed to start benchmark" << std::endl;
+        //WaitForKeyInDebugMode();
         return 1;
     }
 
@@ -315,6 +326,8 @@ int main(int argc, char* argv[])
     {
         SaveResultsToCsv(args.outputFile, allResults);
     }
+
+    WaitForKeyInDebugMode();
 
     return completed ? 0 : 1;
 }
