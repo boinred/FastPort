@@ -19,6 +19,7 @@ public:
     virtual bool Write(std::span<const std::byte> data) = 0;
     virtual bool Pop(std::span<std::byte> outBuffer) = 0;
     virtual bool Peek(std::span<std::byte> outBuffer) = 0;
+    virtual size_t GetReadBuffers(std::vector<std::span<const std::byte>>& outBuffers) = 0;
     virtual bool Consume(size_t size) = 0;
     virtual size_t CanReadSize() const = 0;
     virtual size_t CanWriteSize() const = 0;

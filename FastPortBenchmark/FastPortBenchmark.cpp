@@ -52,7 +52,7 @@ std::string GetTimestampString()
     localtime_s(&tm, &time);
     
     std::ostringstream oss;
-    oss << std::put_time(&tm, "%Y-%m-%d-%H-%M");
+    oss << std::put_time(&tm, "%Y-%m-%d-%H-%M-%S");
     return oss.str();
 }
 

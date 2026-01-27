@@ -76,6 +76,8 @@ private:
         OVERLAPPED Overlapped{};
         // WSARecv/WSASend용 연속 버퍼 저장소.
         std::vector<char> Buffers{};
+        // Scatter-Gather I/O를 위한 WSABUF 배열
+        std::vector<WSABUF> WSABufs{};
         // 이번 요청 바이트 수.
         size_t RequestedBytes = 0;
 

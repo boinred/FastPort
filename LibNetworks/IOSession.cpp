@@ -49,9 +49,11 @@ void IOSession::SendBuffer(std::span<const std::byte> data)
 
 void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage)
 {
+    // TODO: 동적 할당 발생 부분.
     std::ostringstream os;
     rfMessage.SerializePartialToOstream(&os);
 
+    // TODO: 내부 std::vector에 헤더+바디 합침 (할당 및 복사)
     const Core::Packet packet(packetId, os.str());
 
     SendBuffer(packet.GetRawSpan());
@@ -115,25 +117,40 @@ bool IOSession::TryPostSendFromQueue()
         return true;
     }
 
-    // Peek은 원자적으로 m_Size만큼 버퍼를 채우고, 그 크기를 반환합니다.
-    const size_t bytesToSend = m_pSendBuffer->Peek(m_SendOverlapped.Buffers);
+    // 링버퍼에서 전송할 데이터 포인터들을 직접 가져옵니다 (Zero-Copy)
+    // 데이터는 전송이 완료된 후(OnIOCompleted)에 Consume합니다.
+    std::vector<std::span<const std::byte>> buffers;
+    const size_t bytesToSend = m_pSendBuffer->GetReadBuffers(buffers);
+
     if (bytesToSend == 0)
     {
         m_SendInProgress.store(false);
         return true;
     }
 
-
     m_SendOverlapped.RequestedBytes = bytesToSend;
     m_SendOverlapped.ResetOverlapped();
+    
+    // WSABUF 배열 구성
+    m_SendOverlapped.WSABufs.clear();
+    m_SendOverlapped.WSABufs.reserve(buffers.size());
+    for (const auto& span : buffers)
+    {
+        WSABUF wsaBuf{};
+        wsaBuf.buf = const_cast<char*>(reinterpret_cast<const char*>(span.data()));
+        wsaBuf.len = static_cast<ULONG>(span.size());
+        m_SendOverlapped.WSABufs.push_back(wsaBuf);
+    }
 
-    WSABUF wsaBuf{};
-    wsaBuf.buf = m_SendOverlapped.Buffers.data();
-    wsaBuf.len = static_cast<ULONG>(m_SendOverlapped.Buffers.size());
+    DWORD bytesSent = 0;
+    int result = ::WSASend(m_pSocket->GetSocket(), 
+        m_SendOverlapped.WSABufs.data(), 
+        static_cast<DWORD>(m_SendOverlapped.WSABufs.size()), 
+        &bytesSent, 
+        0, 
+        &m_SendOverlapped.Overlapped, 
+        nullptr);
 
-    DWORD bytes = 0;
-
-    int result = ::WSASend(m_pSocket->GetSocket(), &wsaBuf, 1, &bytes, 0, &m_SendOverlapped.Overlapped, nullptr);
     if (result == SOCKET_ERROR)
     {
         int err = ::WSAGetLastError();
@@ -146,7 +163,9 @@ bool IOSession::TryPostSendFromQueue()
         }
     }
 
-    m_pSendBuffer->Consume(bytesToSend);
+    // 성공 또는 Pending 시:
+    // Consume은 여기서 하지 않고, OnIOCompleted 시점에 처리합니다.
+    // 기존의 m_pSendBuffer->Consume(bytesToSend); 제거됨.
 
     return true;
 }
@@ -203,14 +222,17 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         }
 
         const size_t requested = m_SendOverlapped.RequestedBytes;
-        if (requested > 0 && bytesTransferred > requested)
+        
+        // 전송 완료된 만큼 버퍼 비우기 (Delayed Consume)
+        if (m_pSendBuffer)
         {
-            LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Send bytesTransferred is larger than requested. Session Id : {}, Requested : {}, Transferred : {}", GetSessionId(), requested, bytesTransferred);
-            bytesTransferred = static_cast<DWORD>(requested);
+            m_pSendBuffer->Consume(bytesTransferred);
         }
 
         if (requested > 0 && bytesTransferred < requested)
         {
+             // TODO: 부분 전송 처리. 
+             // 현재 로직상으로는 다음 TryPostSendFromQueue에서 남은 데이터를 다시 시도함.
             LibCommons::Logger::GetInstance().LogDebug("IOSession", "OnIOCompleted() Partial send. Session Id : {}, Requested : {}, Transferred : {}", GetSessionId(), requested, bytesTransferred);
         }
 

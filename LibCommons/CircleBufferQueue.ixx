@@ -38,7 +38,6 @@ public:
 
 
     // 버퍼에 데이터를 씁니다.
-    // 버퍼에 데이터를 씁니다.
     bool Write(std::span<const std::byte> data) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
@@ -50,8 +49,8 @@ public:
         }
 
         const char* byteData = reinterpret_cast<const char*>(data.data());
-        size_t writeIndex = m_Head;
-        size_t firstPart = std::min(size, m_Capacity - writeIndex);
+        const size_t writeIndex = m_Head;
+        const size_t firstPart = std::min(size, m_Capacity - writeIndex);
 
         std::memcpy(&m_Buffer[writeIndex], byteData, firstPart);
 
@@ -67,7 +66,6 @@ public:
     }
 
     // 버퍼에서 데이터를 읽고 제거합니다.
-    // 버퍼에서 데이터를 읽고 제거합니다.
     bool Pop(std::span<std::byte> outBuffer) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
@@ -79,8 +77,8 @@ public:
         }
 
         char* byteBuffer = reinterpret_cast<char*>(outBuffer.data());
-        size_t readIndex = m_Tail;
-        size_t firstPart = std::min(size, m_Capacity - readIndex);
+        const size_t readIndex = m_Tail;
+        const size_t firstPart = std::min(size, m_Capacity - readIndex);
 
         std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
 
@@ -96,7 +94,6 @@ public:
     }
 
     // 버퍼에서 데이터를 읽기만 하고 제거하지 않습니다.
-    // 버퍼에서 데이터를 읽기만 하고 제거하지 않습니다.
     bool Peek(std::span<std::byte> outBuffer) override
     {
         auto lock = LibCommons::ReadLockBlock(m_RWLock);
@@ -108,8 +105,8 @@ public:
         }
 
         char* byteBuffer = reinterpret_cast<char*>(outBuffer.data());
-        size_t readIndex = m_Tail;
-        size_t firstPart = std::min(size, m_Capacity - readIndex);
+        const size_t readIndex = m_Tail;
+        const size_t firstPart = std::min(size, m_Capacity - readIndex);
 
         std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
 
@@ -135,8 +132,8 @@ public:
         outBuffer.resize(sizeToPeek);
 
         char* byteBuffer = outBuffer.data();
-        size_t readIndex = m_Tail;
-        size_t firstPart = std::min(sizeToPeek, m_Capacity - readIndex);
+        const size_t readIndex = m_Tail;
+        const size_t firstPart = std::min(sizeToPeek, m_Capacity - readIndex);
 
         std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
 
@@ -146,6 +143,29 @@ public:
         }
 
         return sizeToPeek;
+    }
+
+    // 버퍼에서 읽을 수 있는 데이터 세그먼트들을 반환합니다 (Scatter-Gather I/O 지원)
+    size_t GetReadBuffers(std::vector<std::span<const std::byte>>& outBuffers) override
+    {
+        auto lock = LibCommons::ReadLockBlock(m_RWLock);
+        outBuffers.clear();
+
+        if (m_Size == 0)
+        {
+            return 0;
+        }
+
+        const size_t firstPart = std::min(m_Size, m_Capacity - m_Tail);
+        outBuffers.emplace_back(std::as_bytes(std::span(m_Buffer.data() + m_Tail, firstPart)));
+
+        if (m_Size > firstPart)
+        {
+            const size_t secondPart = m_Size - firstPart;
+            outBuffers.emplace_back(std::as_bytes(std::span(m_Buffer.data(), secondPart)));
+        }
+
+        return m_Size;
     }
 
     size_t Pop(std::vector<char>& outBuffer) override
@@ -162,8 +182,8 @@ public:
         outBuffer.resize(sizeToPop);
 
         char* byteBuffer = outBuffer.data();
-        size_t readIndex = m_Tail;
-        size_t firstPart = std::min(sizeToPop, m_Capacity - readIndex);
+        const size_t readIndex = m_Tail;
+        const size_t firstPart = std::min(sizeToPop, m_Capacity - readIndex);
 
         std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
 
@@ -207,12 +227,10 @@ public:
 
     void Clear() override
     {
-        if (auto lock = LibCommons::WriteLockBlock(m_RWLock))
-        {
-            m_Head = 0;
-            m_Tail = 0;
-            m_Size = 0;
-        }
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
+        m_Head = 0;
+        m_Tail = 0;
+        m_Size = 0;
     }
 
 private:
