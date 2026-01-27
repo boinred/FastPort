@@ -22,30 +22,30 @@ namespace LibCommonsTests
 			Assert::AreEqual((size_t)0, queue.CanReadSize());
 
 			// Write "12345"
-			char data1[] = "12345";
-			Assert::IsTrue(queue.Write(data1, 5));
+			char data1[] = "12345"; // 6 bytes including null, we want 5
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(data1, 5))));
 			Assert::AreEqual((size_t)5, queue.CanWriteSize());
 			Assert::AreEqual((size_t)5, queue.CanReadSize());
 
 			// Peek
 			char buffer[10] = { 0, };
-			Assert::IsTrue(queue.Peek(buffer, 5));
+			Assert::IsTrue(queue.Peek(std::as_writable_bytes(std::span(buffer, 5))));
 			Assert::AreEqual(std::string("12345"), std::string(buffer, 5));
 			Assert::AreEqual((size_t)5, queue.CanReadSize());
 
 			// Pop "123"
-			Assert::IsTrue(queue.Pop(buffer, 3));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer, 3))));
 			Assert::AreEqual(std::string("123"), std::string(buffer, 3));
 			Assert::AreEqual((size_t)2, queue.CanReadSize()); // "45" remains
 
 			// Write "6789012" (7 bytes) -> Total 9 bytes. Wraps around if implemented correctly.
 			char data2[] = "6789012";
-			Assert::IsTrue(queue.Write(data2, 7));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(data2, 7))));
 			Assert::AreEqual((size_t)9, queue.CanReadSize());
 
 			// Pop all "456789012"
 			char buffer2[10] = { 0, };
-			Assert::IsTrue(queue.Pop(buffer2, 9));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer2, 9))));
 			Assert::AreEqual(std::string("456789012"), std::string(buffer2, 9));
 
 			// Empty again
@@ -54,19 +54,19 @@ namespace LibCommonsTests
 
 			// Test overflow
 			char data3[] = "12345678901"; // 11 bytes
-			Assert::IsFalse(queue.Write(data3, 11));
+			Assert::IsFalse(queue.Write(std::as_bytes(std::span(data3, 11))));
 
 			// Test Consume
-			Assert::IsTrue(queue.Write(data1, 5)); // Write "12345"
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(data1, 5)))); // Write "12345"
 			Assert::IsTrue(queue.Consume(2)); // Consume "12"
 			Assert::AreEqual((size_t)3, queue.CanReadSize()); // "345" remains
 			
 			char buffer3[10] = { 0, };
-			Assert::IsTrue(queue.Pop(buffer3, 3));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer3, 3))));
 			Assert::AreEqual(std::string("345"), std::string(buffer3, 3));
 
 			// Test Clear
-			Assert::IsTrue(queue.Write(data1, 5));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(data1, 5))));
 			queue.Clear();
 			Assert::AreEqual((size_t)0, queue.CanReadSize());
 			Assert::AreEqual((size_t)10, queue.CanWriteSize());
@@ -80,17 +80,17 @@ namespace LibCommonsTests
 			CircleBufferQueue queue(5);
 
 			char data[] = "12345";
-			Assert::IsTrue(queue.Write(data, 5));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(data, 5))));
 			Assert::AreEqual((size_t)5, queue.CanReadSize());
 			Assert::AreEqual((size_t)0, queue.CanWriteSize());
 
 			// Try to write when full
 			char extra = '6';
-			Assert::IsFalse(queue.Write(&extra, 1));
+			Assert::IsFalse(queue.Write(std::as_bytes(std::span(&extra, 1))));
 
 			// Verify data is still intact
 			char buffer[6] = { 0, };
-			Assert::IsTrue(queue.Peek(buffer, 5));
+			Assert::IsTrue(queue.Peek(std::as_writable_bytes(std::span(buffer, 5))));
 			Assert::AreEqual(std::string("12345"), std::string(buffer));
 
 			// Make space
@@ -98,14 +98,14 @@ namespace LibCommonsTests
 			Assert::AreEqual((size_t)1, queue.CanWriteSize());
 
 			// Write 1 byte
-			Assert::IsTrue(queue.Write(&extra, 1));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(&extra, 1))));
 
 			// Try to write again
-			Assert::IsFalse(queue.Write(&extra, 1));
+			Assert::IsFalse(queue.Write(std::as_bytes(std::span(&extra, 1))));
 			
 			// Verify content after wrap write
 			// Current state: "23456" (logical)
-			Assert::IsTrue(queue.Peek(buffer, 5));
+			Assert::IsTrue(queue.Peek(std::as_writable_bytes(std::span(buffer, 5))));
 			Assert::AreEqual(std::string("23456"), std::string(buffer));
 		}
 
@@ -117,31 +117,31 @@ namespace LibCommonsTests
 
 			// Move head to middle
 			char padding[] = "12345";
-			Assert::IsTrue(queue.Write(padding, 5));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(padding, 5))));
 			Assert::IsTrue(queue.Consume(5));
 
 			// Now Head=5, Tail=5. Capacity=10.
 
 			// Write 8 bytes. 5 bytes at [5..9], 3 bytes at [0..2]
 			char data[] = "ABCDEFGH";
-			Assert::IsTrue(queue.Write(data, 8));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(data, 8))));
 
 			Assert::AreEqual((size_t)8, queue.CanReadSize());
 
 			char buffer[9] = { 0 };
-			Assert::IsTrue(queue.Peek(buffer, 8));
+			Assert::IsTrue(queue.Peek(std::as_writable_bytes(std::span(buffer, 8))));
 			Assert::AreEqual(std::string("ABCDEFGH"), std::string(buffer));
 
 			// Pop 6 bytes. Tail moves from 5 -> 9 -> 1.
 			char popBuffer[7] = { 0 };
-			Assert::IsTrue(queue.Pop(popBuffer, 6));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(popBuffer, 6))));
 			Assert::AreEqual(std::string("ABCDEF"), std::string(popBuffer));
 
 			// Remaining: GH at [1..2]
 			Assert::AreEqual((size_t)2, queue.CanReadSize());
 
 			char remaining[3] = { 0 };
-			Assert::IsTrue(queue.Pop(remaining, 2));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(remaining, 2))));
 			Assert::AreEqual(std::string("GH"), std::string(remaining));
 		}
 
@@ -153,17 +153,17 @@ namespace LibCommonsTests
 
 			// Zero size write/read
 			char data = 'A';
-			Assert::IsTrue(queue.Write(&data, 0));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(&data, 0))));
 			Assert::AreEqual((size_t)0, queue.CanReadSize());
 
 			char buffer;
-			Assert::IsTrue(queue.Pop(&buffer, 0));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(&buffer, 0))));
 
 			// Pop from empty
-			Assert::IsFalse(queue.Pop(&buffer, 1));
+			Assert::IsFalse(queue.Pop(std::as_writable_bytes(std::span(&buffer, 1))));
 
 			// Peek from empty
-			Assert::IsFalse(queue.Peek(&buffer, 1));
+			Assert::IsFalse(queue.Peek(std::as_writable_bytes(std::span(&buffer, 1))));
 
 			// Consume from empty
 			Assert::IsFalse(queue.Consume(1));
@@ -180,7 +180,7 @@ namespace LibCommonsTests
 
 			// 1. 버퍼보다 큰 데이터 한 번에 쓰기 시도 -> 실패해야 함
 			char largeData[] = "123456789012345"; // 15 bytes
-			Assert::IsFalse(queue.Write(largeData, 15));
+			Assert::IsFalse(queue.Write(std::as_bytes(std::span(largeData, 15))));
 			Assert::AreEqual((size_t)0, queue.CanReadSize());
 			Assert::AreEqual(BUFFER_SIZE, queue.CanWriteSize());
 
@@ -196,7 +196,7 @@ namespace LibCommonsTests
 				size_t toWrite = std::min(queue.CanWriteSize(), 26 - totalWritten);
 				if (toWrite > 0)
 				{
-					Assert::IsTrue(queue.Write(bigData + totalWritten, toWrite));
+					Assert::IsTrue(queue.Write(std::as_bytes(std::span(bigData + totalWritten, toWrite))));
 					totalWritten += toWrite;
 				}
 
@@ -205,7 +205,7 @@ namespace LibCommonsTests
 				if (toRead > 0)
 				{
 					char buffer[11] = { 0 };
-					Assert::IsTrue(queue.Pop(buffer, toRead));
+					Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer, toRead))));
 					readResult.append(buffer, toRead);
 					totalRead += toRead;
 				}
@@ -216,7 +216,7 @@ namespace LibCommonsTests
 			{
 				size_t toRead = queue.CanReadSize();
 				char buffer[11] = { 0 };
-				Assert::IsTrue(queue.Pop(buffer, toRead));
+				Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer, toRead))));
 				readResult.append(buffer, toRead);
 				totalRead += toRead;
 			}
@@ -243,12 +243,12 @@ namespace LibCommonsTests
 				// 매 사이클마다 버퍼 크기만큼 쓰고 읽기
 				const char* chunk = testData + (cycle * BUFFER_SIZE);
 				
-				Assert::IsTrue(queue.Write(chunk, BUFFER_SIZE));
+				Assert::IsTrue(queue.Write(std::as_bytes(std::span(chunk, BUFFER_SIZE))));
 				Assert::AreEqual((size_t)0, queue.CanWriteSize());
 				Assert::AreEqual(BUFFER_SIZE, queue.CanReadSize());
 
 				char buffer[9] = { 0 };
-				Assert::IsTrue(queue.Pop(buffer, BUFFER_SIZE));
+				Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer, BUFFER_SIZE))));
 				readResult.append(buffer, BUFFER_SIZE);
 
 				Assert::AreEqual(BUFFER_SIZE, queue.CanWriteSize());
@@ -278,7 +278,7 @@ namespace LibCommonsTests
 				if (writePos < streamLen && queue.CanWriteSize() > 0)
 				{
 					size_t toWrite = std::min(queue.CanWriteSize(), streamLen - writePos);
-					Assert::IsTrue(queue.Write(streamData + writePos, toWrite));
+					Assert::IsTrue(queue.Write(std::as_bytes(std::span(streamData + writePos, toWrite))));
 					writePos += toWrite;
 				}
 
@@ -287,7 +287,7 @@ namespace LibCommonsTests
 				if (readable > 0)
 				{
 					char peekBuffer[17] = { 0 };
-					Assert::IsTrue(queue.Peek(peekBuffer, readable));
+					Assert::IsTrue(queue.Peek(std::as_writable_bytes(std::span(peekBuffer, readable))));
 					
 					// Peek한 데이터가 올바른지 확인
 					std::string peeked(peekBuffer, readable);
@@ -297,7 +297,7 @@ namespace LibCommonsTests
 					
 					// Consume 전에 Pop으로 실제 데이터 가져오기
 					char popBuffer[17] = { 0 };
-					Assert::IsTrue(queue.Pop(popBuffer, toConsume));
+					Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(popBuffer, toConsume))));
 					accumulated.append(popBuffer, toConsume);
 				}
 			}
@@ -316,35 +316,35 @@ namespace LibCommonsTests
 
 			// 정확히 버퍼 크기만큼 쓰기 -> 성공
 			char exactData[] = "1234567890";
-			Assert::IsTrue(queue.Write(exactData, BUFFER_SIZE));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(exactData, BUFFER_SIZE))));
 			Assert::AreEqual((size_t)0, queue.CanWriteSize());
 			Assert::AreEqual(BUFFER_SIZE, queue.CanReadSize());
 
 			// 버퍼 크기 + 1 쓰기 시도 -> 실패 (버퍼 가득 참)
 			char extraByte = 'X';
-			Assert::IsFalse(queue.Write(&extraByte, 1));
+			Assert::IsFalse(queue.Write(std::as_bytes(std::span(&extraByte, 1))));
 
 			// 읽고 비우기
 			char buffer[11] = { 0 };
-			Assert::IsTrue(queue.Pop(buffer, BUFFER_SIZE));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer, BUFFER_SIZE))));
 			Assert::AreEqual(std::string("1234567890"), std::string(buffer));
 
 			// 버퍼 크기 - 1 쓰기
 			char almostFull[] = "123456789";
-			Assert::IsTrue(queue.Write(almostFull, BUFFER_SIZE - 1));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(almostFull, BUFFER_SIZE - 1))));
 			Assert::AreEqual((size_t)1, queue.CanWriteSize());
 
 			// 1바이트 추가 -> 성공
-			Assert::IsTrue(queue.Write(&extraByte, 1));
+			Assert::IsTrue(queue.Write(std::as_bytes(std::span(&extraByte, 1))));
 			Assert::AreEqual((size_t)0, queue.CanWriteSize());
 
 			// 2바이트 추가 시도 -> 실패
 			char twoBytes[] = "YZ";
-			Assert::IsFalse(queue.Write(twoBytes, 2));
+			Assert::IsFalse(queue.Write(std::as_bytes(std::span(twoBytes, 2))));
 
 			// 전체 읽기 검증
 			memset(buffer, 0, sizeof(buffer));
-			Assert::IsTrue(queue.Pop(buffer, BUFFER_SIZE));
+			Assert::IsTrue(queue.Pop(std::as_writable_bytes(std::span(buffer, BUFFER_SIZE))));
 			Assert::AreEqual(std::string("123456789X"), std::string(buffer));
 		}
 	};

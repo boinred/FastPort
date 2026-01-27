@@ -38,16 +38,18 @@ public:
 
 
     // 버퍼에 데이터를 씁니다.
-    bool Write(const void* pData, size_t size) override
+    // 버퍼에 데이터를 씁니다.
+    bool Write(std::span<const std::byte> data) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
 
+        const size_t size = data.size();
         if (m_Capacity - m_Size < size)
         {
             return false;
         }
 
-        const char* byteData = static_cast<const char*>(pData);
+        const char* byteData = reinterpret_cast<const char*>(data.data());
         size_t writeIndex = m_Head;
         size_t firstPart = std::min(size, m_Capacity - writeIndex);
 
@@ -65,16 +67,18 @@ public:
     }
 
     // 버퍼에서 데이터를 읽고 제거합니다.
-    bool Pop(void* outBuffer, size_t size) override
+    // 버퍼에서 데이터를 읽고 제거합니다.
+    bool Pop(std::span<std::byte> outBuffer) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
 
+        const size_t size = outBuffer.size();
         if (m_Size < size)
         {
             return false;
         }
 
-        char* byteBuffer = static_cast<char*>(outBuffer);
+        char* byteBuffer = reinterpret_cast<char*>(outBuffer.data());
         size_t readIndex = m_Tail;
         size_t firstPart = std::min(size, m_Capacity - readIndex);
 
@@ -92,16 +96,18 @@ public:
     }
 
     // 버퍼에서 데이터를 읽기만 하고 제거하지 않습니다.
-    bool Peek(void* outBuffer, size_t size) override
+    // 버퍼에서 데이터를 읽기만 하고 제거하지 않습니다.
+    bool Peek(std::span<std::byte> outBuffer) override
     {
         auto lock = LibCommons::ReadLockBlock(m_RWLock);
 
+        const size_t size = outBuffer.size();
         if (m_Size < size)
         {
             return false;
         }
 
-        char* byteBuffer = static_cast<char*>(outBuffer);
+        char* byteBuffer = reinterpret_cast<char*>(outBuffer.data());
         size_t readIndex = m_Tail;
         size_t firstPart = std::min(size, m_Capacity - readIndex);
 
@@ -115,19 +121,74 @@ public:
         return true;
     }
 
+    size_t Peek(std::vector<char>& outBuffer) override
+    {
+        auto lock = LibCommons::ReadLockBlock(m_RWLock);
+
+        if (m_Size == 0)
+        {
+            outBuffer.clear();
+            return 0;
+        }
+
+        const size_t sizeToPeek = m_Size;
+        outBuffer.resize(sizeToPeek);
+
+        char* byteBuffer = outBuffer.data();
+        size_t readIndex = m_Tail;
+        size_t firstPart = std::min(sizeToPeek, m_Capacity - readIndex);
+
+        std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
+
+        if (sizeToPeek > firstPart)
+        {
+            std::memcpy(byteBuffer + firstPart, &m_Buffer[0], sizeToPeek - firstPart);
+        }
+
+        return sizeToPeek;
+    }
+
+    size_t Pop(std::vector<char>& outBuffer) override
+    {
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
+
+        if (m_Size == 0)
+        {
+            outBuffer.clear();
+            return 0;
+        }
+
+        const size_t sizeToPop = m_Size;
+        outBuffer.resize(sizeToPop);
+
+        char* byteBuffer = outBuffer.data();
+        size_t readIndex = m_Tail;
+        size_t firstPart = std::min(sizeToPop, m_Capacity - readIndex);
+
+        std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
+
+        if (sizeToPop > firstPart)
+        {
+            std::memcpy(byteBuffer + firstPart, &m_Buffer[0], sizeToPop - firstPart);
+        }
+
+        m_Tail = (m_Tail + sizeToPop) % m_Capacity;
+        m_Size -= sizeToPop;
+
+        return sizeToPop;
+    }
+
     // 버퍼에서 데이터를 제거합니다.
     bool Consume(size_t size) override
     {
-        if (auto lock = LibCommons::WriteLockBlock(m_RWLock))
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
+        if (m_Size < size)
         {
-            if (m_Size < size)
-            {
-                return false;
-            }
-
-            m_Tail = (m_Tail + size) % m_Capacity;
-            m_Size -= size;
+            return false;
         }
+
+        m_Tail = (m_Tail + size) % m_Capacity;
+        m_Size -= size;
 
         return true;
     }

@@ -66,7 +66,7 @@ protected:
 
 private:
     // 송신 큐 적재 및 비동기 송신 트리거.
-    void SendBuffer(const unsigned char* pData, size_t dataLength);
+    void SendBuffer(std::span<const std::byte> data);
 
     void ReadReceivedBuffers();
 

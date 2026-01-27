@@ -28,18 +28,18 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     m_RecvOverlapped.Buffers.resize(16 * 1024);
 }
 
-void IOSession::SendBuffer(const unsigned char* pData, size_t dataLength)
+void IOSession::SendBuffer(std::span<const std::byte> data)
 {
-    if (!pData || dataLength == 0 || !m_pSendBuffer)
+    if (data.empty() || !m_pSendBuffer)
     {
         LibCommons::Logger::GetInstance().LogError("IOSession", "SendBuffer() Invalid parameters. Session Id : {}", GetSessionId());
 
         return;
     }
 
-    if (!m_pSendBuffer->Write(pData, dataLength))
+    if (!m_pSendBuffer->Write(data))
     {
-        LibCommons::Logger::GetInstance().LogError("IOSession", "SendBuffer() Failed to write data to send buffer. Session Id : {}, Data Length : {}", GetSessionId(), dataLength);
+        LibCommons::Logger::GetInstance().LogError("IOSession", "SendBuffer() Failed to write data to send buffer. Session Id : {}, Data Length : {}", GetSessionId(), data.size());
 
         return;
     }
@@ -54,7 +54,7 @@ void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Mes
 
     const Core::Packet packet(packetId, os.str());
 
-    SendBuffer(packet.GetRawData(), packet.GetPacketSize());
+    SendBuffer(packet.GetRawSpan());
 }
 
 void IOSession::RequestReceived()
@@ -101,30 +101,28 @@ bool IOSession::PostRecv()
 bool IOSession::TryPostSendFromQueue()
 {
     // Send는 outstanding 1개만 유지
+    // 1. 다른 스레드가 이미 전송 작업을 시작했는지 확인 (진입 잠금)
     bool expected = false;
     if (!m_SendInProgress.compare_exchange_strong(expected, true))
     {
+        // 1. 다른 스레드가 이미 전송 작업을 시작했는지 확인 (진입 잠금)
         return true;
     }
 
-    if (!m_pSendBuffer || m_pSendBuffer->CanReadSize() == 0)
+    if (!m_pSendBuffer)
     {
         m_SendInProgress.store(false);
         return true;
     }
 
-    const size_t bytesToSend = std::min<size_t>(m_pSendBuffer->CanReadSize(), static_cast<size_t>(m_pSendBuffer->GetMaxSize()));
-
-    m_SendOverlapped.Buffers.resize(bytesToSend);
-
-    if (!m_pSendBuffer->Peek(m_SendOverlapped.Buffers.data(), bytesToSend))
+    // Peek은 원자적으로 m_Size만큼 버퍼를 채우고, 그 크기를 반환합니다.
+    const size_t bytesToSend = m_pSendBuffer->Peek(m_SendOverlapped.Buffers);
+    if (bytesToSend == 0)
     {
-        LibCommons::Logger::GetInstance().LogError("IOSession", "TryPostSendFromQueue() Failed to peek data from send buffer. Session Id : {}, Bytes To Send : {}", GetSessionId(), bytesToSend);
-
         m_SendInProgress.store(false);
-
-        return false;
+        return true;
     }
+
 
     m_SendOverlapped.RequestedBytes = bytesToSend;
     m_SendOverlapped.ResetOverlapped();
@@ -147,6 +145,8 @@ bool IOSession::TryPostSendFromQueue()
             return false;
         }
     }
+
+    m_pSendBuffer->Consume(bytesToSend);
 
     return true;
 }
@@ -177,7 +177,7 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             return;
         }
 
-        if (!m_pReceiveBuffer->Write(m_RecvOverlapped.Buffers.data(), bytesTransferred))
+        if (!m_pReceiveBuffer->Write(std::as_bytes(std::span(m_RecvOverlapped.Buffers.data(), bytesTransferred))))
         {
             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Receive buffer overflow. Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
             RequestDisconnect();
@@ -214,13 +214,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             LibCommons::Logger::GetInstance().LogDebug("IOSession", "OnIOCompleted() Partial send. Session Id : {}, Requested : {}, Transferred : {}", GetSessionId(), requested, bytesTransferred);
         }
 
-        if (!m_pSendBuffer->Consume(bytesTransferred))
-        {
-            LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Send buffer consume failed. Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
-            RequestDisconnect();
-            return;
-        }
-
         OnSent(bytesTransferred);
 
         const bool hasPending = m_pSendBuffer && (m_pSendBuffer->CanReadSize() > 0);
@@ -248,21 +241,21 @@ void IOSession::ReadReceivedBuffers()
         auto frame = m_PacketFramer.TryPop(*m_pReceiveBuffer);
         if (frame.Result == Core::PacketFrameResult::NeedMore)
         {
-            return;
+            break;
         }
 
         if (frame.Result == Core::PacketFrameResult::Invalid)
         {
             logger.LogError("IOSession", "ReadReceivedBuffers() Invalid packet frame. Session Id : {}", GetSessionId());
             RequestDisconnect();
-            return;
+            break;
         }
 
         if (!frame.PacketOpt.has_value())
         {
             logger.LogError("IOSession", "ReadReceivedBuffers() Packet frame ok but packet missing. Session Id : {}", GetSessionId());
             RequestDisconnect();
-            return;
+            break;
         }
 
         OnPacketReceived(*frame.PacketOpt);
