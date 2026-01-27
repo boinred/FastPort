@@ -145,7 +145,6 @@ public:
         return sizeToPeek;
     }
 
-    // 버퍼에서 읽을 수 있는 데이터 세그먼트들을 반환합니다 (Scatter-Gather I/O 지원)
     size_t GetReadBuffers(std::vector<std::span<const std::byte>>& outBuffers) override
     {
         auto lock = LibCommons::ReadLockBlock(m_RWLock);
@@ -166,6 +165,38 @@ public:
         }
 
         return m_Size;
+    }
+
+    // 버퍼에 쓰기 공간을 예약하고, 예약된 공간의 포인터들을 반환합니다 (Zero-Copy Write 지원)
+    // 이 함수를 호출하면 즉시 Head가 이동합니다. (Commit 불필요)
+    bool AllocateWrite(size_t size, std::vector<std::span<std::byte>>& outBuffers) override
+    {
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
+        outBuffers.clear();
+
+        if (m_Capacity - m_Size < size)
+        {
+            return false;
+        }
+
+        size_t writeIndex = m_Head;
+        size_t firstPart = std::min(size, m_Capacity - writeIndex);
+        
+        // reinterpret_cast to std::byte*
+        std::byte* bufferData = reinterpret_cast<std::byte*>(m_Buffer.data());
+
+        outBuffers.emplace_back(std::span(bufferData + writeIndex, firstPart));
+
+        if (size > firstPart)
+        {
+            size_t secondPart = size - firstPart;
+            outBuffers.emplace_back(std::span(bufferData, secondPart));
+        }
+
+        m_Head = (m_Head + size) % m_Capacity;
+        m_Size += size;
+
+        return true;
     }
 
     size_t Pop(std::vector<char>& outBuffer) override

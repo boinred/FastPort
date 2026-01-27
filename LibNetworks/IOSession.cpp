@@ -1,18 +1,16 @@
 ﻿module;
 
-#include <utility>
-#include <vector>
-#include <string>
-#include <algorithm>
-#include <cstdint>
-#include <cstring>
 #include <WinSock2.h>
 #include <spdlog/spdlog.h>
 
 module networks.sessions.io_session;
+
+import std; 
+
 import commons.logger;
 import networks.core.packet;
 import networks.core.packet_framer;
+
 
 namespace LibNetworks::Sessions
 {
@@ -47,16 +45,89 @@ void IOSession::SendBuffer(std::span<const std::byte> data)
     TryPostSendFromQueue();
 }
 
+// 헬퍼 함수: 버퍼 조각들에 데이터를 씁니다.
+static void WriteToBuffers(const std::vector<std::span<std::byte>>& buffers, size_t& bufferIdx, size_t& offsetInSpan, const void* data, size_t size)
+{
+    const unsigned char* src = static_cast<const unsigned char*>(data);
+    size_t remaining = size;
+
+    while (remaining > 0 && bufferIdx < buffers.size())
+    {
+        std::span<std::byte> span = buffers[bufferIdx];
+        size_t spaceInSpan = span.size() - offsetInSpan;
+        size_t toCopy = remaining < spaceInSpan ? remaining : spaceInSpan;
+        
+
+        std::memcpy(span.data() + offsetInSpan, src, toCopy);
+
+        src += toCopy;
+        remaining -= toCopy;
+        offsetInSpan += toCopy;
+
+        if (offsetInSpan == span.size())
+        {
+            bufferIdx++;
+            offsetInSpan = 0;
+        }
+    }
+}
+
 void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage)
 {
-    // TODO: 동적 할당 발생 부분.
-    std::ostringstream os;
-    rfMessage.SerializePartialToOstream(&os);
+    const size_t bodySize = rfMessage.ByteSizeLong();
+    const size_t totalSize = Core::Packet::GetHeaderSize() + Core::Packet::GetPacketIdSize() + bodySize;
 
-    // TODO: 내부 std::vector에 헤더+바디 합침 (할당 및 복사)
-    const Core::Packet packet(packetId, os.str());
+    if (!m_pSendBuffer)
+    {
+        return;
+    }
 
-    SendBuffer(packet.GetRawSpan());
+    std::vector<std::span<std::byte>> buffers;
+    // 링버퍼에 직접 공간 예약 (실패 시 전송 불가)
+    if (!m_pSendBuffer->AllocateWrite(totalSize, buffers))
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "SendMessage() Send buffer overflow. Session Id : {}, Packet Size : {}", GetSessionId(), totalSize);
+        RequestDisconnect();
+        return;
+    }
+
+    // 헤더 및 패킷 ID 직렬화 (네트워크 바이트 오더)
+    uint16_t sizeNet = htons(static_cast<uint16_t>(totalSize));
+    uint16_t idNet = htons(packetId);
+
+    size_t bufferIdx = 0;
+    size_t offsetInSpan = 0;
+
+    WriteToBuffers(buffers, bufferIdx, offsetInSpan, &sizeNet, sizeof(sizeNet));
+    WriteToBuffers(buffers, bufferIdx, offsetInSpan, &idNet, sizeof(idNet));
+
+    // Protobuf Body 직렬화
+    if (bodySize > 0)
+    {
+        // 최적화: 버퍼가 1개이고 공간이 충분하면 SerializeToArray 사용 (가장 빠름)
+        if (bufferIdx < buffers.size() && buffers[bufferIdx].size() - offsetInSpan >= bodySize)
+        {
+            rfMessage.SerializeToArray(buffers[bufferIdx].data() + offsetInSpan, static_cast<int>(bodySize));
+        }
+        else
+        {
+            // 버퍼가 쪼개져 있거나(Wrap around), 공간이 부족한 경우 (여기선 공간 부족일 리는 없음, Allocate 성공했으므로)
+            // 임시 버퍼 없이 쪼개서 넣거나, Protobuf의 ArrayOutputStream을 여러 개 써야 함.
+            // 간단하게: 임시 버퍼에 직렬화 후 WriteToBuffers (To avoid implementing complex ZeroCopyOutputStream right now)
+            // *하지만* 우리는 "할당 최소화"가 목표이므로, 스택 메모리나 thread_local 버퍼를 활용해야 함.
+            // 여기서는 일단 std::string을 쓰는 기존 방식보다는 낫지만, 완벽한 Zero-Copy는 아님 (Wrap around 시).
+            // 그러나 대부분 패킷은 1개 버퍼에 들어갈 것임.
+            // Wrap around 발생하는 경우에만 임시 복사 발생.
+            
+            // TODO: 완벽한 Zero-Copy를 위해 RingBufferOutputStream 구현 필요.
+            // 현재는 간단히 처리.
+            std::string temp; // Fallback
+            rfMessage.SerializeToString(&temp);
+            WriteToBuffers(buffers, bufferIdx, offsetInSpan, temp.data(), temp.size());
+        }
+    }
+
+    TryPostSendFromQueue();
 }
 
 void IOSession::RequestReceived()
