@@ -30,12 +30,6 @@ public:
     CircleBufferQueue(const CircleBufferQueue&) = delete;
     CircleBufferQueue& operator=(const CircleBufferQueue&) = delete;
 
-    // 버퍼의 최대 크기를 반환.
-    const int GetMaxSize() const override
-    {
-        return static_cast<int>(m_Capacity);
-    }
-
 
     // 버퍼에 데이터를 씁니다.
     bool Write(std::span<const std::byte> data) override
@@ -118,33 +112,6 @@ public:
         return true;
     }
 
-    size_t Peek(std::vector<char>& outBuffer) override
-    {
-        auto lock = LibCommons::ReadLockBlock(m_RWLock);
-
-        if (m_Size == 0)
-        {
-            outBuffer.clear();
-            return 0;
-        }
-
-        const size_t sizeToPeek = m_Size;
-        outBuffer.resize(sizeToPeek);
-
-        char* byteBuffer = outBuffer.data();
-        const size_t readIndex = m_Tail;
-        const size_t firstPart = std::min(sizeToPeek, m_Capacity - readIndex);
-
-        std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
-
-        if (sizeToPeek > firstPart)
-        {
-            std::memcpy(byteBuffer + firstPart, &m_Buffer[0], sizeToPeek - firstPart);
-        }
-
-        return sizeToPeek;
-    }
-
     size_t GetReadBuffers(std::vector<std::span<const std::byte>>& outBuffers) override
     {
         auto lock = LibCommons::ReadLockBlock(m_RWLock);
@@ -199,36 +166,6 @@ public:
         return true;
     }
 
-    size_t Pop(std::vector<char>& outBuffer) override
-    {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
-
-        if (m_Size == 0)
-        {
-            outBuffer.clear();
-            return 0;
-        }
-
-        const size_t sizeToPop = m_Size;
-        outBuffer.resize(sizeToPop);
-
-        char* byteBuffer = outBuffer.data();
-        const size_t readIndex = m_Tail;
-        const size_t firstPart = std::min(sizeToPop, m_Capacity - readIndex);
-
-        std::memcpy(byteBuffer, &m_Buffer[readIndex], firstPart);
-
-        if (sizeToPop > firstPart)
-        {
-            std::memcpy(byteBuffer + firstPart, &m_Buffer[0], sizeToPop - firstPart);
-        }
-
-        m_Tail = (m_Tail + sizeToPop) % m_Capacity;
-        m_Size -= sizeToPop;
-
-        return sizeToPop;
-    }
-
     // 버퍼에서 데이터를 제거합니다.
     bool Consume(size_t size) override
     {
@@ -262,6 +199,50 @@ public:
         m_Head = 0;
         m_Tail = 0;
         m_Size = 0;
+    }
+
+    // (Direct I/O Recv) 현재 쓰기 가능한 모든 연속된 메모리 블록들을 반환합니다.
+    size_t GetWriteableBuffers(std::vector<std::span<std::byte>>& outBuffers) override
+    {
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
+        outBuffers.clear();
+
+        const size_t freeSpace = m_Capacity - m_Size;
+        if (freeSpace == 0)
+        {
+            return 0;
+        }
+
+        size_t writeIndex = m_Head;
+        size_t firstPart = std::min(freeSpace, m_Capacity - writeIndex);
+        
+        std::byte* bufferData = reinterpret_cast<std::byte*>(m_Buffer.data());
+        outBuffers.emplace_back(std::span(bufferData + writeIndex, firstPart));
+
+        if (freeSpace > firstPart)
+        {
+            size_t secondPart = freeSpace - firstPart;
+            outBuffers.emplace_back(std::span(bufferData, secondPart));
+        }
+
+        return freeSpace;
+    }
+
+    // (Direct I/O Recv) 쓰기 작업 완료 후, 실제로 쓴 크기만큼 포인터(Head)를 이동시킵니다.
+    bool CommitWrite(size_t size) override
+    {
+        auto lock = LibCommons::WriteLockBlock(m_RWLock);
+        
+        if (m_Capacity - m_Size < size)
+        {
+            // 이론상 발생하면 안 됨 (GetWriteableBuffers 이후라면)
+            return false;
+        }
+
+        m_Head = (m_Head + size) % m_Capacity;
+        m_Size += size;
+        
+        return true;
     }
 
 private:

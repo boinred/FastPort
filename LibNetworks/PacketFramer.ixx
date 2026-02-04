@@ -29,9 +29,9 @@ export struct PacketFrame
 export class PacketFramer
 {
 public:
-    PacketFramer() = default;
+    PacketFramer() = delete;
 
-    PacketFrame TryPop(LibCommons::Buffers::IBuffer& rfReceiveBuffer)
+    static PacketFrame TryFrameFromBuffer(LibCommons::Buffers::IBuffer& rfReceiveBuffer)
     {
         const size_t canRead = rfReceiveBuffer.CanReadSize();
         if (canRead < Packet::GetHeaderSize())

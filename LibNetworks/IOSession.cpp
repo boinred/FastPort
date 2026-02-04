@@ -148,14 +148,46 @@ bool IOSession::PostRecv()
 
     m_RecvOverlapped.ResetOverlapped();
 
-    WSABUF wsaBuf{};
-    wsaBuf.buf = m_RecvOverlapped.Buffers.data();
-    wsaBuf.len = static_cast<ULONG>(m_RecvOverlapped.Buffers.size());
+    // Zero-Copy Recv: 수신 버퍼의 쓰기 가능한 공간을 직접 WSABUF로 설정
+    std::vector<std::span<std::byte>> buffers;
+    size_t writableSize = m_pReceiveBuffer->GetWriteableBuffers(buffers);
 
+    if (writableSize == 0)
+    {
+        // 버퍼 가득 참 -> 잠시 대기하거나 연결 종료
+        // 여기서는 일단 Recv 보류하고, 소비(Consume)될 때 다시 시도해야 함.
+        // 그러나 현재 구조상 OnPacketReceived 등에서 소비가 바로 일어나므로,
+        // 드문 케이스임. 일단 로그 찍고 종료 처리.
+         LibCommons::Logger::GetInstance().LogError("IOSession", "PostRecv() Receive buffer full. Session Id : {}", GetSessionId());
+         m_RecvInProgress.store(false);
+         RequestDisconnect(); // 혹은 나중에 재시도 로직 필요
+         return false;
+    }
+
+    m_RecvOverlapped.WSABufs.clear();
+    m_RecvOverlapped.WSABufs.reserve(buffers.size());
+    for (const auto& span : buffers)
+    {
+        WSABUF wsaBuf{};
+        wsaBuf.buf = reinterpret_cast<char*>(span.data());
+        wsaBuf.len = static_cast<ULONG>(span.size());
+        m_RecvOverlapped.WSABufs.push_back(wsaBuf);
+    }
+    
+    // WSARecv 시에는 총 버퍼 크기만큼 받을 수 있음.
+    // 하지만 WSASend와 달리 WSARecv의 bytes 파라미터는 '수신된' 바이트 수임 (Completion 시점).
+    
     DWORD flags = 0;
     DWORD bytes = 0;
 
-    int result = ::WSARecv(m_pSocket->GetSocket(), &wsaBuf, 1, &bytes, &flags, &m_RecvOverlapped.Overlapped, nullptr);
+    int result = ::WSARecv(m_pSocket->GetSocket(), 
+        m_RecvOverlapped.WSABufs.data(), 
+        static_cast<DWORD>(m_RecvOverlapped.WSABufs.size()), 
+        &bytes, 
+        &flags, 
+        &m_RecvOverlapped.Overlapped, 
+        nullptr);
+
     if (result == SOCKET_ERROR)
     {
         int err = ::WSAGetLastError();
@@ -267,12 +299,17 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             return;
         }
 
-        if (!m_pReceiveBuffer->Write(std::as_bytes(std::span(m_RecvOverlapped.Buffers.data(), bytesTransferred))))
+        // Zero-Copy Recv Commit
+        // 실제로 받은 만큼 버퍼 포인터 이동
+        if (!m_pReceiveBuffer->CommitWrite(bytesTransferred))
         {
-            LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Receive buffer overflow. Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
-            RequestDisconnect();
-            return;
+             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() CommitWrite failed (Overflow?). Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
+             RequestDisconnect();
+             return;
         }
+
+        // 기존의 Write 호출(복사) 제거됨:
+        // m_pReceiveBuffer->Write(...) 삭제
 
         ReadReceivedBuffers();
 
@@ -331,7 +368,7 @@ void IOSession::ReadReceivedBuffers()
 
     while (true)
     {
-        auto frame = m_PacketFramer.TryPop(*m_pReceiveBuffer);
+        auto frame = Core::PacketFramer::TryFrameFromBuffer(*m_pReceiveBuffer);
         if (frame.Result == Core::PacketFrameResult::NeedMore)
         {
             break;

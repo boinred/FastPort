@@ -128,8 +128,6 @@ private:
     // 세션 식별자 시퀀스.
     inline static std::atomic<uint64_t> m_NextSessionId = 1;
 
-    Core::PacketFramer m_PacketFramer{};
-
 };
 
 

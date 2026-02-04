@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <cstddef>
 #include <vector>
@@ -15,9 +15,6 @@ export class IBuffer
 public:
     virtual ~IBuffer() = default;
 
-    // 버퍼의 전체 용량을 반환.
-    virtual const int GetMaxSize() const = 0;
-
     // 데이터를 버퍼에 복사.
     virtual bool Write(std::span<const std::byte> data) = 0;
 
@@ -32,8 +29,16 @@ public:
     virtual size_t GetReadBuffers(std::vector<std::span<const std::byte>>& outBuffers) = 0;
 
     // (Zero-Copy Write) 쓰기 공간을 예약하고 해당 메모리 블록들을 반환.
-    // 호출 즉시 내부 Head 포인터가 이동하므로, 반환된 버퍼에 데이터를 채워야 합니다.
+    // 호출 즉시 내부 Head 포인터가 이동하므로, 반환된 버퍼에 데이터를 채워야 함.
     virtual bool AllocateWrite(size_t size, std::vector<std::span<std::byte>>& outBuffers) = 0;
+
+    // (Direct I/O Recv) 현재 쓰기 가능한 모든 연속된 메모리 블록들을 반환.
+    // 내부 포인터(Head)를 이동시키지 않습니다 (CommitWrite로 별도 이동 필요).
+    // 반환값: 쓰기 가능한 총 크기
+    virtual size_t GetWriteableBuffers(std::vector<std::span<std::byte>>& outBuffers) = 0;
+
+    // (Direct I/O Recv) 쓰기 작업 완료 후, 실제로 쓴 크기만큼 포인터(Head)를 이동시킵니다.
+    virtual bool CommitWrite(size_t size) = 0;
 
     // (Zero-Copy) 읽기 버퍼 포인터(Tail)를 수동으로 이동시켜 데이터를 제거 처리.
     // GetReadBuffers() 등으로 직접 데이터 처리 후 호출.
@@ -47,20 +52,6 @@ public:
 
     // 버퍼의 내용을 모두 비움.
     virtual void Clear() = 0;
-
-    // 벡터로 데이터를 복사.
-    virtual size_t Peek(std::vector<char>& outBuffer)
-    {
-        outBuffer.clear();
-        return 0;
-    }
-
-    // 벡터로 데이터를 복사하며 꺼냄.
-    virtual size_t Pop(std::vector<char>& outBuffer)
-    {
-        outBuffer.clear();
-        return 0;
-    }
 };
 
 }
