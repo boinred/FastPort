@@ -14,6 +14,7 @@ import networks.core.socket;
 import networks.core.packet;
 import networks.core.packet_framer;
 import commons.buffers.ibuffer;
+import std; 
 
 namespace LibNetworks::Sessions
 {
@@ -66,7 +67,7 @@ protected:
 
 private:
     // 송신 큐 적재 및 비동기 송신 트리거.
-    void SendBuffer(const unsigned char* pData, size_t dataLength);
+    void SendBuffer(std::span<const std::byte> data);
 
     void ReadReceivedBuffers();
 
@@ -76,6 +77,8 @@ private:
         OVERLAPPED Overlapped{};
         // WSARecv/WSASend용 연속 버퍼 저장소.
         std::vector<char> Buffers{};
+        // Scatter-Gather I/O를 위한 WSABUF 배열
+        std::vector<WSABUF> WSABufs{};
         // 이번 요청 바이트 수.
         size_t RequestedBytes = 0;
 
@@ -124,8 +127,6 @@ private:
 
     // 세션 식별자 시퀀스.
     inline static std::atomic<uint64_t> m_NextSessionId = 1;
-
-    Core::PacketFramer m_PacketFramer{};
 
 };
 

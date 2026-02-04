@@ -23,7 +23,7 @@ public:
 
     // Raw 버퍼 기반 패킷 생성(버퍼 소유권 이동)
     Packet(std::vector<unsigned char>&& buffers)
-        : m_PacketId(GetPacketIdFromBuffer(buffers.data())),
+        : m_PacketId(GetPacketIdFromBuffer(std::as_bytes(std::span(buffers)))),
           m_Payload(reinterpret_cast<const char*>(buffers.data() + GetHeaderSize() + GetPacketIdSize()),
                    buffers.size() - GetHeaderSize() - GetPacketIdSize()),
           m_RawBinaries(std::move(buffers))
@@ -36,8 +36,8 @@ public:
         MakeRawBinaries();
     }
 
-    Packet(uint16_t packetId, const unsigned char* pData, size_t sizeOfData)
-        : m_PacketId(static_cast<int16_t>(packetId)), m_Payload(reinterpret_cast<const char*>(pData), sizeOfData)
+    Packet(uint16_t packetId, std::span<const std::byte> data)
+        : m_PacketId(static_cast<int16_t>(packetId)), m_Payload(reinterpret_cast<const char*>(data.data()), data.size())
     {
         MakeRawBinaries();
     }
@@ -45,27 +45,27 @@ public:
     inline static constexpr size_t GetHeaderSize() { return sizeof(uint16_t); }
     inline static constexpr size_t GetPacketIdSize() { return sizeof(uint16_t); }
 
-    inline static uint16_t GetHeaderFromBuffer(const unsigned char* pData)
+    inline static uint16_t GetHeaderFromBuffer(std::span<const std::byte> data)
     {
-        if (!pData)
+        if (data.size() < sizeof(uint16_t))
         {
             return 0;
         }
 
         uint16_t net = 0;
-        std::memcpy(&net, pData, sizeof(net));
+        std::memcpy(&net, data.data(), sizeof(net));
         return ntohs(net);
     }
 
-    inline static uint16_t GetPacketIdFromBuffer(const unsigned char* pData)
+    inline static uint16_t GetPacketIdFromBuffer(std::span<const std::byte> data)
     {
-        if (!pData)
+        if (data.size() < GetHeaderSize() + sizeof(uint16_t))
         {
             return 0;
         }
 
         uint16_t net = 0;
-        std::memcpy(&net, pData + GetHeaderSize(), sizeof(net));
+        std::memcpy(&net, data.data() + GetHeaderSize(), sizeof(net));
         return ntohs(net);
     }
 
@@ -75,7 +75,10 @@ public:
 
     constexpr uint16_t GetPayloadSize() const { return static_cast<uint16_t>(m_Payload.size()); }
 
-    const unsigned char* GetRawData() const { return m_RawBinaries.data(); }
+    std::span<const std::byte> GetRawSpan() const
+    {
+        return std::as_bytes(std::span(m_RawBinaries));
+    }
 
     uint16_t GetPacketIdFromRawBinaries() const
     {
@@ -84,7 +87,7 @@ public:
             return 0;
         }
 
-        return GetPacketIdFromBuffer(m_RawBinaries.data());
+        return GetPacketIdFromBuffer(GetRawSpan());
     }
 
     template<class T>

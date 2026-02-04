@@ -3,6 +3,16 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Folder Name="/docs/">
+    <File Path="docs/ARCHITECTURE_IOCP.md" />
+    <File Path="docs/ARCHITECTURE_RIO.md" />
+    <File Path="docs/BUILD_GUIDE.md" />
+    <File Path="docs/CPP_MODERN_FEATURES.md" />
+    <File Path="docs/MODULE_DEPENDENCIES.md" />
+    <File Path="docs/PACKET_PROTOCOL.md" />
+    <File Path="docs/PROJECT_STRUCTURE.md" />
+    <File Path="docs/README_DOCS.md" />
+  </Folder>
   <Folder Name="/솔루션 항목/">
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
@@ -10,6 +20,7 @@
     <File Path="vcpkg-configuration.json" />
     <File Path="vcpkg.json" />
   </Folder>
+  <Project Path="FastPortBenchmark/FastPortBenchmark.vcxproj" Id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
   <Project Path="FastPortClient/FastPortClient.vcxproj" Id="f5a0ad86-da01-49cf-9b8a-3dafa82b1b44" />
   <Project Path="FastPortServer/FastPortServer.vcxproj" Id="c2f2bb10-c6d8-4b4a-9157-6d0b5902852e" />
   <Project Path="LibCommons/LibCommons.vcxproj" Id="4f7088d5-e65b-4b71-97bf-91019bb758c5" />

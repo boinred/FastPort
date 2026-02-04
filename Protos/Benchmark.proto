@@ -1,0 +1,81 @@
+﻿syntax = "proto3";
+
+import "Commons.proto";
+package fastport.protocols.benchmark;
+
+option optimize_for = SPEED;
+
+// 벤치마크 요청 메시지
+message BenchmarkRequest
+{
+    commons.Header header       = 1;
+    uint64 client_timestamp_ns  = 2;    // 클라이언트 전송 시점 (나노초)
+    uint32 sequence             = 3;    // 시퀀스 번호
+    bytes payload               = 4;    // 가변 크기 페이로드
+}
+
+// 벤치마크 응답 메시지
+message BenchmarkResponse
+{
+    commons.Header header               = 1;
+    commons.ResultCode result           = 2;
+    uint64 client_timestamp_ns          = 3;    // 클라이언트 원본 타임스탬프 (Echo)
+    uint64 server_recv_timestamp_ns     = 4;    // 서버 수신 시점
+    uint64 server_send_timestamp_ns     = 5;    // 서버 전송 시점
+    uint32 sequence                     = 6;    // 시퀀스 번호 (Echo)
+    bytes payload                       = 7;    // 페이로드 (Echo)
+}
+
+// 벤치마크 시작 요청
+message BenchmarkStartRequest
+{
+    commons.Header header       = 1;
+    string test_name            = 2;    // 테스트 이름
+    uint32 iterations           = 3;    // 반복 횟수
+    uint32 payload_size         = 4;    // 페이로드 크기 (바이트)
+    uint32 warmup_iterations    = 5;    // 워밍업 횟수
+}
+
+// 벤치마크 시작 응답
+message BenchmarkStartResponse
+{
+    commons.Header header       = 1;
+    commons.ResultCode result   = 2;
+    string session_id           = 3;    // 벤치마크 세션 ID
+}
+
+// 벤치마크 완료 요청
+message BenchmarkEndRequest
+{
+    commons.Header header       = 1;
+    string session_id           = 2;
+    uint32 total_sent           = 3;    // 총 전송 패킷 수
+}
+
+// 벤치마크 완료 응답 (서버 측 통계 포함)
+message BenchmarkEndResponse
+{
+    commons.Header header           = 1;
+    commons.ResultCode result       = 2;
+    uint32 total_received           = 3;    // 서버가 수신한 패킷 수
+    uint64 server_elapsed_ns        = 4;    // 서버 측 총 경과 시간
+}
+
+// 처리량 테스트용 단방향 메시지
+message ThroughputData
+{
+    uint32 sequence     = 1;
+    bytes payload       = 2;
+    bool is_last        = 3;    // 마지막 패킷 여부
+}
+
+// 처리량 테스트 결과 응답
+message ThroughputResult
+{
+    commons.Header header       = 1;
+    uint32 packets_received     = 2;
+    uint64 bytes_received       = 3;
+    uint64 elapsed_ns           = 4;
+    double packets_per_second   = 5;
+    double megabytes_per_second = 6;
+}

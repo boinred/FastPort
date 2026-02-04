@@ -38,6 +38,7 @@ graph TB
     subgraph Application["Application Layer"]
         Server[FastPortServer]
         Client[FastPortClient]
+        Benchmark[FastPortBenchmark]
     end
 
     subgraph Session["Session Layer"]
@@ -68,6 +69,7 @@ graph TB
 
     Server --> Inbound
     Client --> Outbound
+    Benchmark --> Outbound
     Inbound --> IOSession
     Outbound --> IOSession
     Listener --> Inbound
@@ -115,6 +117,11 @@ FastPort/
 │  ├─ FastPortClient.cpp
 │  └─ FastPortOutboundSession.*
 │
+├─ FastPortBenchmark/        # 성능 벤치마크 도구
+│  ├─ FastPortBenchmark.cpp
+│  ├─ LatencyBenchmarkRunner.*
+│  └─ BenchmarkSession.ixx
+│
 ├─ LibNetworks/              # 네트워크 코어 라이브러리
 │  ├─ Socket.*               # Winsock 소켓 래퍼
 │  ├─ IOService.*            # IOCP 워커 스레드 관리
@@ -140,7 +147,10 @@ FastPort/
 │
 ├─ Protos/                   # .proto 정의 파일
 │  ├─ Commons.proto
-│  └─ Tests.proto
+│  ├─ Tests.proto
+│  └─ Benchmark.proto
+│
+├─ docs/                     # 프로젝트 문서
 │
 └─ Tests/                    # 단위 테스트
    ├─ LibCommonsTests/
@@ -215,7 +225,7 @@ stateDiagram-v2
 
 | 계층 | 역할 | 주요 클래스 |
 |------|------|------------|
-| Application | 비즈니스 로직 | `FastPortServer`, `FastPortClient` |
+| Application | 비즈니스 로직 | `FastPortServer`, `FastPortClient`, `FastPortBenchmark` |
 | Session | 세션 상태 관리 | `InboundSession`, `OutboundSession` |
 | Network Core | I/O 처리 | `IOSession`, `PacketFramer`, `Packet` |
 | IOCP Service | 스레드 관리 | `IOService`, `IIOConsumer` |
@@ -254,11 +264,58 @@ vcpkg install grpc:x64-windows
 
 # 클라이언트 실행 (별도 터미널)
 .\FastPortClient.exe
+
+# 벤치마크 실행 (별도 터미널)
+.\FastPortBenchmark.exe --iterations 10000 --output results.csv
 ```
 
 ---
 
-## 📊 기술적 의사결정
+## 📊 벤치마크
+
+네트워크 성능 측정을 위한 벤치마크 도구가 포함되어 있습니다.
+
+### 측정 항목
+
+| 지표 | 설명 |
+|------|------|
+| **Latency (RTT)** | 요청-응답 왕복 시간 |
+| **Throughput** | 초당 패킷/바이트 처리량 |
+| **P50/P90/P95/P99** | 백분위 레이턴시 |
+
+### 사용법
+
+```powershell
+# 기본 실행
+FastPortBenchmark.exe
+
+# 옵션 지정
+FastPortBenchmark.exe --host 127.0.0.1 --port 9000 --iterations 10000 --payload 64
+
+# CSV 출력 (타임스탬프 자동 추가)
+FastPortBenchmark.exe --output results.csv
+# → results_2024-01-15-14-30.csv 생성
+```
+
+자세한 내용은 [벤치마크 가이드](docs/BENCHMARK_GUIDE.md)를 참조하세요.
+
+---
+
+## 📚 문서
+
+| 문서 | 설명 |
+|------|------|
+| [프로젝트 구조](docs/PROJECT_STRUCTURE.md) | 디렉터리 및 파일 구조 |
+| [모듈 의존성](docs/MODULE_DEPENDENCIES.md) | C++20 모듈 의존성 다이어그램 |
+| [IOCP 아키텍처](docs/IOCP_ARCHITECTURE.md) | IOCP 기반 비동기 I/O 구조 |
+| [패킷 프로토콜](docs/PACKET_PROTOCOL.md) | 패킷 포맷 및 프로토콜 명세 |
+| [빌드 가이드](docs/BUILD_GUIDE.md) | 빌드 및 실행 방법 |
+| [벤치마크 가이드](docs/BENCHMARK_GUIDE.md) | 성능 측정 도구 사용법 |
+| [C++ 최신 기능 활용](docs/CPP_MODERN_FEATURES.md) | C++20/23 최적화 포인트 |
+
+---
+
+## 📈 기술적 의사결정
 
 | 결정 사항 | 선택 | 이유 |
 |-----------|------|------|
@@ -268,6 +325,16 @@ vcpkg install grpc:x64-windows
 | 패킷 엔디안 | Network Byte Order | 플랫폼 독립적 통신, 표준 준수 |
 | 동기화 | SRWLock + atomic | 읽기 작업 빈번 시 성능 우위, lock-free 패턴 |
 | 직렬화 | Protocol Buffers | 언어 중립적, 효율적인 바이너리 직렬화 |
+
+---
+
+## 🚀 향후 개선 계획
+
+- [ ] Zero-copy Send 최적화 (scatter-gather I/O)
+- [ ] 세션 매니저 구현 (멀티 세션 관리, 브로드캐스트)
+- [ ] Graceful Shutdown 처리 (pending I/O cancel)
+- [ ] 암호화 레이어 추가 (TLS/SSL)
+- [ ] C++20/23 최신 기능 적용 (`std::span`, `std::expected` 등)
 
 ---
 

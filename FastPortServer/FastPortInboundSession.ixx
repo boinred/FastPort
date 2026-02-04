@@ -19,7 +19,6 @@ public:
 
     void OnAccepted() override;
 
-
     void OnDisconnected() override;
 
 protected:
@@ -27,4 +26,7 @@ protected:
 
     void OnSent(size_t bytesSent) override;
 
+private:
+    void HandleBenchmarkRequest(const LibNetworks::Core::Packet& rfPacket);
+    void HandleEchoRequest(const LibNetworks::Core::Packet& rfPacket);
 };

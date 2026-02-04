@@ -143,4 +143,26 @@ bool Socket::UpdateConnectContext() const
     return true;
 }
 
+bool Socket::UpdateNoDelayContext() const
+{
+    // Nagle 알고리즘 비활성화 (TCP_NODELAY 설정)
+    BOOL bNoDelay = TRUE; // 켜기 (Nagle 끄기)
+    int nRet = ::setsockopt(
+        m_Socket,                       // 옵션을 적용할 소켓
+        IPPROTO_TCP,                    // 프로토콜 레벨 (TCP)
+        TCP_NODELAY,                    // 옵션 이름
+        (const char*)&bNoDelay,         // 옵션 값 (Windows에서는 char* 캐스팅 필요)
+        sizeof(bNoDelay)                // 옵션 값의 크기
+    );
+
+    if (SOCKET_ERROR == nRet)
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "OnIOCompleted: setsockopt(TCP_NODELAY) failed. Error: {}", ::WSAGetLastError());
+
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace LibNetworks::Core

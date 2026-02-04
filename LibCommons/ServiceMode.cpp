@@ -27,6 +27,8 @@ bool ServiceMode::Installer::Install(LPCWSTR ServiceName, LPCWSTR DisplayName, D
     assert(nullptr != hManager);
     if (nullptr == hManager)
     {
+        std::cout << "SCMManager open failed. : " << ::GetLastError() << std::endl;
+
         //spdlog::info("Hello, {}!", "world");
         logger.LogError("ServiceMode", "Install, SCManager open is failed. Error : {}", ::GetLastError());
 
@@ -61,7 +63,7 @@ bool ServiceMode::Installer::Install(LPCWSTR ServiceName, LPCWSTR DisplayName, D
             StrConverter::ToAnsi(moduleFileName),
             ::GetLastError());
 
-
+        std::cout << "To service install is not success. : " << ::GetLastError() << std::endl;
         ::CloseServiceHandle(hManager);
 
         return false;
@@ -376,6 +378,8 @@ bool ServiceMode::Execute(const DWORD argc, const char* argv[])
             WriteEventLogEntry(L"Columbus service is install failed.", EVENTLOG_ERROR_TYPE);
         }
 
+        std::cout << "service is install. : " << bSuccess << std::endl;
+
     }
     else if (result.count(C_UNINSTALL))
     {
@@ -479,7 +483,7 @@ void ServiceMode::Wait()
 
 void WINAPI ServiceMode::ServiceMain(DWORD argc, TCHAR* argv[])
 {
-     LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service Name : {}, ServiceMain function.", m_pServiceMode->GetServiceNameAnsi());
+    LibCommons::Logger::GetInstance().LogInfo("ServiceMode", "Service Name : {}, ServiceMain function.", m_pServiceMode->GetServiceNameAnsi());
 
     m_pServiceMode->m_StatusHandle = ::RegisterServiceCtrlHandler(m_pServiceMode->GetServiceName().c_str(), ServiceCtrlHandler);
     if (nullptr == m_pServiceMode->m_StatusHandle)

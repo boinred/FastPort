@@ -1,0 +1,35 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug FastPortBenchmark",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/_Builds/x64/Debug/FastPortBenchmark.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/FastPortBenchmark",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "build-debug-x64"
+        },
+        {
+            "name": "Debug FastPortServer",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/_Builds/x64/Debug/FastPortServer.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/FastPortServer",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "build-debug-x64"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Debug Server & Benchmark",
+            "configurations": ["Debug FastPortServer", "Debug FastPortBenchmark"]
+        }
+    ]
+}

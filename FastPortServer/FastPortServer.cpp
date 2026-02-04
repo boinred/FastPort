@@ -14,11 +14,12 @@ import fastport_service_mode;
 
 int main(int argc, const char* argv[])
 {
-    std::string location;
+    std::string location = std::filesystem::current_path().string();
+
+    std::cout << "Current Path : " << location << std::endl;
 
     bool bServiceMode = true;
 #if _DEBUG
-    location = std::filesystem::current_path().string();
     bServiceMode = false;
 #endif // #if _DEBUG
 
@@ -44,9 +45,7 @@ int main(int argc, const char* argv[])
 #if _DEBUG 
     pServiceMode->Wait();
 #endif // #if _DEBUG
-    logger.LogInfo("Main", "FastPort Started. V : {}", "Closed.");
-
-    
+    logger.LogInfo("Main", "FastPort Started. V : {}", "Closed.");    
 }
 
 // 프로그램 실행: <Ctrl+F5> 또는 [디버그] > [디버깅하지 않고 시작] 메뉴

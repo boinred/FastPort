@@ -79,6 +79,7 @@ public:
     }
 
     bool UpdateConnectContext() const;
+    bool UpdateNoDelayContext() const; 
 private:
     SOCKET m_Socket = INVALID_SOCKET;
     sockaddr_in m_SockAddr = {};

@@ -29,9 +29,9 @@ export struct PacketFrame
 export class PacketFramer
 {
 public:
-    PacketFramer() = default;
+    PacketFramer() = delete;
 
-    PacketFrame TryPop(LibCommons::Buffers::IBuffer& rfReceiveBuffer)
+    static PacketFrame TryFrameFromBuffer(LibCommons::Buffers::IBuffer& rfReceiveBuffer)
     {
         const size_t canRead = rfReceiveBuffer.CanReadSize();
         if (canRead < Packet::GetHeaderSize())
@@ -40,12 +40,12 @@ public:
         }
 
         unsigned char header[Packet::GetHeaderSize()]{};
-        if (!rfReceiveBuffer.Peek(header, Packet::GetHeaderSize()))
+        if (!rfReceiveBuffer.Peek(std::as_writable_bytes(std::span(header))))
         {
             return { PacketFrameResult::Invalid, std::nullopt };
         }
 
-        const uint16_t packetSize = Packet::GetHeaderFromBuffer(header);
+        const uint16_t packetSize = Packet::GetHeaderFromBuffer(std::as_bytes(std::span(header)));
         const size_t minPacketSize = Packet::GetHeaderSize() + Packet::GetPacketIdSize();
 
         if (packetSize < minPacketSize)
@@ -67,7 +67,7 @@ public:
         std::vector<unsigned char> buffers;
         buffers.resize(static_cast<size_t>(packetSize));
 
-        if (!rfReceiveBuffer.Pop(buffers.data(), buffers.size()))
+        if (!rfReceiveBuffer.Pop(std::as_writable_bytes(std::span(buffers))))
         {
             return { PacketFrameResult::Invalid, std::nullopt };
         }

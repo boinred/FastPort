@@ -36,16 +36,25 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Benchmark.grpc.pb.cc" />
+    <ClCompile Include="Benchmark.pb.cc" />
     <ClCompile Include="Commons.grpc.pb.cc" />
     <ClCompile Include="Commons.pb.cc" />
     <ClCompile Include="Tests.grpc.pb.cc" />
     <ClCompile Include="Tests.pb.cc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Benchmark.grpc.pb.h" />
+    <ClInclude Include="Benchmark.pb.h" />
     <ClInclude Include="Commons.grpc.pb.h" />
     <ClInclude Include="Commons.pb.h" />
     <ClInclude Include="Tests.grpc.pb.h" />
     <ClInclude Include="Tests.pb.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="..\Protos\Benchmark.proto">
+      <FileType>Document</FileType>
+    </CustomBuild>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>

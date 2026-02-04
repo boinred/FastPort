@@ -77,6 +77,11 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
             ::closesocket(pAcceptOverlapped->AcceptSocket);
 
             // 문제.
+
+            // TODO: 1. SO_REUSE_ADDR 설정
+            // TODO: 2. TCP_NODELAY 설정
+            // TODO: 3. Zero-copy 설정 (Send/Recv 버퍼 0으로 설정) 
+            //  TIPS: IOCP 모델에서 전송 완료 시점까지 버퍼 관리를 완벽히 할 수 있을 때만 사용
         }
         else
         {

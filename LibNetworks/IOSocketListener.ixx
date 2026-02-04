@@ -16,6 +16,7 @@ import networks.services.io_service;
 
 namespace LibNetworks::Core
 {
+    // TODO : IOSocketAcceptor로 변경 할 것!
 export class IOSocketListener : public Core::IIOConsumer, std::enable_shared_from_this<IOSocketListener>
 {
     // AcceptEx용 OVERLAPPED 확장 구조체
