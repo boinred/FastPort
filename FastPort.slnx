@@ -4,9 +4,10 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/docs/">
+    <File Path="docs/ARCHITECTURE_IOCP.md" />
+    <File Path="docs/ARCHITECTURE_RIO.md" />
     <File Path="docs/BUILD_GUIDE.md" />
     <File Path="docs/CPP_MODERN_FEATURES.md" />
-    <File Path="docs/IOCP_ARCHITECTURE.md" />
     <File Path="docs/MODULE_DEPENDENCIES.md" />
     <File Path="docs/PACKET_PROTOCOL.md" />
     <File Path="docs/PROJECT_STRUCTURE.md" />
