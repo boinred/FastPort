@@ -308,8 +308,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
              return;
         }
 
-        // 기존의 Write 호출(복사) 제거됨:
-        // m_pReceiveBuffer->Write(...) 삭제
 
         ReadReceivedBuffers();
 
