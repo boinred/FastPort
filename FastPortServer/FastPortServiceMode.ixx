@@ -13,7 +13,7 @@ import commons.logger;
 import commons.buffers.circle_buffer_queue;
 
 import networks.core.socket; 
-import networks.core.io_socket_listener;
+import networks.core.io_socket_acceptor;
 import networks.sessions.inbound_session;
 
 import fastport_inbound_session;
@@ -40,8 +40,8 @@ protected:
                 return pSession;
             };
 
-        m_pListener = LibNetworks::Core::IOSocketListener::Create(m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
-        m_bRunning = nullptr != m_pListener;
+        m_Acceptor = LibNetworks::Core::IOSocketAcceptor::Create(m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
+        m_bRunning = nullptr != m_Acceptor;
     }
 
     void OnStopped() override
@@ -53,10 +53,10 @@ protected:
     {
         LibCommons::Logger::GetInstance().LogInfo("FastPortServiceMode", "OnShutdown. Service : {}", GetDisplayNameAnsi());
 
-        if (m_pListener)
+        if (m_Acceptor)
         {
-            m_pListener->Shutdown();
-            m_pListener.reset();
+            m_Acceptor->Shutdown();
+            m_Acceptor.reset();
         }
     }
 
@@ -70,6 +70,6 @@ private:
 
     const unsigned short C_LISTEN_PORT = 6628;
 
-    LibNetworks::Core::Socket m_ListenSocket = {};
-    std::shared_ptr<LibNetworks::Core::IOSocketListener> m_pListener = {};
+    LibNetworks::Core::Socket m_ListenSocket{};
+    std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> m_Acceptor{};
 };
