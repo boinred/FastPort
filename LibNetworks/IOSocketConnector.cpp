@@ -12,18 +12,18 @@ import commons.logger;
 namespace LibNetworks::Core
 {
 
-    static bool UpdateSocketReuseAddr(SOCKET socket)
+static bool UpdateSocketReuseAddr(SOCKET socket)
+{
+    // SO_REUSEADDR 설정 (서버 리스닝 소켓 필수)
+    BOOL bReuse = TRUE;
+    int nRet = ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&bReuse, sizeof(bReuse));
+    if (nRet == SOCKET_ERROR)
     {
-        // SO_REUSEADDR 설정 (서버 리스닝 소켓 필수)
-        BOOL bReuse = TRUE;
-        int nRet = ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&bReuse, sizeof(bReuse));
-        if (nRet == SOCKET_ERROR)
-        {
-            // 에러 로깅
-            LibCommons::Logger::GetInstance().LogError("IOSocketConnector", "UpdateSocketReuseAddr failed. Error : {}", ::WSAGetLastError());
-        }   
-        return nRet == 0;
+        // 에러 로깅
+        LibCommons::Logger::GetInstance().LogError("IOSocketConnector", "UpdateSocketReuseAddr failed. Error : {}", ::WSAGetLastError());
     }
+    return nRet == 0;
+}
 
 std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_ptr<Services::IOService>& pIOService, OnDoFuncCreateSession pOnDoFuncCreateSession, std::string ip, unsigned short port)
 {
@@ -88,7 +88,7 @@ bool IOSocketConnector::Connect(std::string ip, const unsigned short port)
     if (!m_pIOService->Associate(m_pSocket->GetSocket(), m_pSession->GetCompletionId()))
     {
         logger.LogError("SocketConnector", "Connect, Associate failed. OutboundSession Id : {}", m_pSession->GetSessionId());
-        
+
         DisConnect();
 
         return false;

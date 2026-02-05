@@ -132,14 +132,15 @@ void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Mes
 
 void IOSession::RequestReceived()
 {
-    if (!PostRecv())
+    if (!PostZeroByteRecv())
     {
         RequestDisconnect();
     }
 }
 
-bool IOSession::PostRecv()
+bool IOSession::PostZeroByteRecv()
 {
+    // 이미 진행 중인지 확인
     bool expected = false;
     if (!m_RecvInProgress.compare_exchange_strong(expected, true))
     {
@@ -147,23 +148,70 @@ bool IOSession::PostRecv()
     }
 
     m_RecvOverlapped.ResetOverlapped();
+    m_RecvOverlapped.IsZeroByte = true; // 플래그 설정
+    m_RecvOverlapped.WSABufs.clear();
 
-    // Zero-Copy Recv: 수신 버퍼의 쓰기 가능한 공간을 직접 WSABUF로 설정
+    WSABUF wsaBuf{};
+    wsaBuf.buf = nullptr;
+    wsaBuf.len = 0;
+    
+    // WSARecv (Flags=0, Buffer=0, Len=0)
+    DWORD flags = 0;
+    DWORD bytes = 0;
+
+    int result = ::WSARecv(m_pSocket->GetSocket(), 
+        &wsaBuf, 
+        1, 
+        &bytes, 
+        &flags, 
+        &m_RecvOverlapped.Overlapped, 
+        nullptr);
+
+    if (result == SOCKET_ERROR)
+    {
+        int err = ::WSAGetLastError();
+        if (err != WSA_IO_PENDING)
+        {
+            LibCommons::Logger::GetInstance().LogError("IOSession", "PostZeroByteRecv() WSARecv failed. Session Id : {}, Error Code : {}", GetSessionId(), err);
+
+            m_RecvInProgress.store(false);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool IOSession::PostRealRecv()
+{
+    // PostRealRecv는 OnIOCompleted(ZeroByte)에서 호출되므로
+    // 이미 m_RecvInProgress는 true 상태임 (PostZeroByteRecv가 걸어둠).
+    // 만약 false라면 뭔가 잘못된 상태지만, 재진입 방지는 이미 됨.
+    // *주의*: OnIOCompleted에서 m_RecvInProgress를 false로 만들지 않고 RealRecv를 걸 수도 있고
+    // false로 만들고 다시 걸 수도 있음. 여기서는 false로 만들고 진입한다고 가정하고 다시 체크?
+    // 아니면 그냥 진행? -> 일관성을 위해 OnIOCompleted에서 atomic을 유지한 채로 넘어오는게 좋음.
+    // 하지만 구조상 OnIOCompleted 진입 시점에 이미 완료된 상태이므로 false로 두는게 맞을 수도 있음.
+    // *수정*: OnIOCompleted에서 false로 셋팅하고 여기 호출한다고 가정.
+    
+    // 1. Zero-Copy Recv: 수신 버퍼의 쓰기 가능한 공간을 직접 WSABUF로 설정
     std::vector<std::span<std::byte>> buffers;
-    size_t writableSize = m_pReceiveBuffer->GetWriteableBuffers(buffers);
+    
+    // 버퍼가 꽉 찼는지 확인
+    size_t writableSize = 0;
+    if (m_pReceiveBuffer)
+    {
+         writableSize = m_pReceiveBuffer->GetWriteableBuffers(buffers);
+    }
 
     if (writableSize == 0)
     {
-        // 버퍼 가득 참 -> 잠시 대기하거나 연결 종료
-        // 여기서는 일단 Recv 보류하고, 소비(Consume)될 때 다시 시도해야 함.
-        // 그러나 현재 구조상 OnPacketReceived 등에서 소비가 바로 일어나므로,
-        // 드문 케이스임. 일단 로그 찍고 종료 처리.
-         LibCommons::Logger::GetInstance().LogError("IOSession", "PostRecv() Receive buffer full. Session Id : {}", GetSessionId());
-         m_RecvInProgress.store(false);
-         RequestDisconnect(); // 혹은 나중에 재시도 로직 필요
+         LibCommons::Logger::GetInstance().LogError("IOSession", "PostRealRecv() Receive buffer full. Session Id : {}", GetSessionId());
+         RequestDisconnect();
          return false;
     }
 
+    m_RecvOverlapped.ResetOverlapped();
+    m_RecvOverlapped.IsZeroByte = false; // Real Recv
     m_RecvOverlapped.WSABufs.clear();
     m_RecvOverlapped.WSABufs.reserve(buffers.size());
     for (const auto& span : buffers)
@@ -173,9 +221,6 @@ bool IOSession::PostRecv()
         wsaBuf.len = static_cast<ULONG>(span.size());
         m_RecvOverlapped.WSABufs.push_back(wsaBuf);
     }
-    
-    // WSARecv 시에는 총 버퍼 크기만큼 받을 수 있음.
-    // 하지만 WSASend와 달리 WSARecv의 bytes 파라미터는 '수신된' 바이트 수임 (Completion 시점).
     
     DWORD flags = 0;
     DWORD bytes = 0;
@@ -193,9 +238,10 @@ bool IOSession::PostRecv()
         int err = ::WSAGetLastError();
         if (err != WSA_IO_PENDING)
         {
-            LibCommons::Logger::GetInstance().LogError("IOSession", "PostRecv() WSARecv failed. Session Id : {}, Error Code : {}", GetSessionId(), err);
-
-            m_RecvInProgress.store(false);
+            LibCommons::Logger::GetInstance().LogError("IOSession", "PostRealRecv() WSARecv failed. Session Id : {}, Error Code : {}", GetSessionId(), err);
+            
+            // 여기서 실패하면(연결 끊김 등), 외부에서 atomic 처리를 해제해줘야 함.
+            // (호출자가 false로 만들고 불렀으면 상관없음)
             return false;
         }
     }
@@ -283,39 +329,83 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
     // 멤버 Overlapped 주소로 구분
     if (pOverlapped == &(m_RecvOverlapped.Overlapped))
     {
-        m_RecvInProgress.store(false);
+        // atomic flag 잠시 해제 (다음 요청을 위해)
+        // 하지만 여기서 해제하면 PostRealRecv 시 경합? -> PostRealRecv 안에서 다시 true 만듦?
+        // 아니면 true 상태 유지하고, 다 끝나면 false?
+        // "ZeroByte 완료" -> m_RecvInProgress는 여전히 내꺼임.
+        // "RealRecv 완료" -> m_RecvInProgress 내꺼임.
+        // 따라서 여기서 false로 만들지 말고, 흐름에 따라 결정.
 
         if (!bSuccess)
         {
+            m_RecvInProgress.store(false);
             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
             RequestDisconnect();
             return;
         }
 
-        if (bytesTransferred == 0)
+        // 1. Zero-byte Recv 완료 처리
+        if (m_RecvOverlapped.IsZeroByte)
         {
-            LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv 0 byte. Disconnected. Session Id : {}", GetSessionId());
-            RequestDisconnect();
+            if (bytesTransferred == 0)
+            {
+                // Zero-byte Recv 완료 (데이터 도착 알림)
+                
+                // 실제 데이터를 읽기 위해 Non-Blocking Recv (or Real Recv) 수행
+                // 여기서는 PostRealRecv 호출. 이 함수는 실패 시 m_RecvInProgress = false 처리 해야 함.
+                // 편의상 여기서 atomic flag를 일단 false로 하고 다시 try?
+                // 아니면 그대로 pass? -> PostRealRecv 내부에서 check 안하고 바로 걸면 됨.
+                // PostRealRecv 수정이 필요함 (atomic check 제거 버전 필요하거나...)
+                // 위에서 수정한 PostRealRecv는 atomic check 없음. 
+                // 단, 외부에서 호출하는 경우(RequestReceived)와 겹치지 않게 주의.
+                // RequestReceived는 PostZeroByteRecv를 호출함.
+                
+                // 아무튼 여기서 바로 Real Recv 건다.
+                if (!PostRealRecv())
+                {
+                    m_RecvInProgress.store(false);
+                    RequestDisconnect();
+                }
+                return;
+            }
+            else
+            {
+                // Zero-byte 요청했는데 bytes > 0 일 수는 없음 (버퍼크기 0이라서).
+                // 혹시 모르니 종료 처리
+                m_RecvInProgress.store(false);
+                return;
+            }
+        }
+        else // 2. Real Recv 완료 처리
+        {
+            if (bytesTransferred == 0)
+            {
+                // 실제 Recv 걸었는데 0이면 연결 종료
+                m_RecvInProgress.store(false);
+                LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv 0 byte (Real). Disconnected. Session Id : {}", GetSessionId());
+                RequestDisconnect();
+                return;
+            }
+
+            // Zero-Copy Recv Commit
+            if (!m_pReceiveBuffer->CommitWrite(bytesTransferred))
+            {
+                 LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() CommitWrite failed (Overflow?). Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
+                 m_RecvInProgress.store(false);
+                 RequestDisconnect();
+                 return;
+            }
+
+            ReadReceivedBuffers();
+            
+            // 다 처리했으면 다시 Zero-byte Recv 걸기
+            // 여기서 m_RecvInProgress를 false로 하고 RequestReceived() 호출?
+            // 아니면 그냥 PostZeroByteRecv?
+            m_RecvInProgress.store(false);
+            RequestReceived();
+            
             return;
         }
-
-        // Zero-Copy Recv Commit
-        // 실제로 받은 만큼 버퍼 포인터 이동
-        if (!m_pReceiveBuffer->CommitWrite(bytesTransferred))
-        {
-             LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() CommitWrite failed (Overflow?). Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
-             RequestDisconnect();
-             return;
-        }
-
-        // 기존의 Write 호출(복사) 제거됨:
-        // m_pReceiveBuffer->Write(...) 삭제
-
-        ReadReceivedBuffers();
-
-        RequestReceived();
-
-        return;
     }
 
     if (pOverlapped == &(m_SendOverlapped.Overlapped))

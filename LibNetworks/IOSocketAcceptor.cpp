@@ -5,7 +5,7 @@
 
 #include <spdlog/spdlog.h>
 
-module networks.core.io_socket_listener;
+module networks.core.io_socket_acceptor;
 
 import commons.logger;
 
@@ -13,12 +13,12 @@ namespace LibNetworks::Core
 {
 
 
-std::shared_ptr<LibNetworks::Core::IOSocketListener> IOSocketListener::Create(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession, const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount /*= 100*/)
+std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> IOSocketAcceptor::Create(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession, const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount /*= 100*/)
 {
-    auto pListener = std::make_shared<IOSocketListener>(rfListenerSocket, pOnDoFuncCreateSession);
+    auto pListener = std::make_shared<IOSocketAcceptor>(rfListenerSocket, pOnDoFuncCreateSession);
     if (!pListener->Start(listenPort, maxConnectionCount, threadCount, beginAcceptCount))
     {
-        LibCommons::Logger::GetInstance().LogError("IOSocketListener", "Create - Start failed. Port : {}", listenPort);
+        LibCommons::Logger::GetInstance().LogError("IOSocketAcceptor", "Create - Start failed. Port : {}", listenPort);
         return nullptr;
     }
     return pListener;
@@ -26,13 +26,13 @@ std::shared_ptr<LibNetworks::Core::IOSocketListener> IOSocketListener::Create(Co
 }
 
 
-IOSocketListener::IOSocketListener(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession)
+IOSocketAcceptor::IOSocketAcceptor(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession)
     : m_ListenerSocket(std::move(rfListenerSocket)), m_pOnDoFuncCreateSession(pOnDoFuncCreateSession)
 {
 
 }
 
-void IOSocketListener::Shutdown()
+void IOSocketAcceptor::Shutdown()
 {
     m_bExecuted = false;
     m_pIOService->Stop();
@@ -40,12 +40,12 @@ void IOSocketListener::Shutdown()
 }
 
 //------------------------------------------------------------------------ 
-void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped)
+void IOSocketAcceptor::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped)
 {
     auto& logger = LibCommons::Logger::GetInstance();
     if (!pOverlapped)
     {
-        logger.LogError("SocketListener", "OnIOCompleted: OVERLAPPED is null. bSuccess : {}, BytesTransferred : {}", bSuccess, bytesTransferred);
+        logger.LogError("IOSocketAcceptor", "OnIOCompleted: OVERLAPPED is null. bSuccess : {}, BytesTransferred : {}", bSuccess, bytesTransferred);
 
         return;
     }
@@ -54,13 +54,13 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
     AcceptOverlapped* pAcceptOverlapped = CONTAINING_RECORD(pOverlapped, AcceptOverlapped, Overlapped);
     if (!pAcceptOverlapped)
     {
-        logger.LogError("SocketListener", "OnIOCompleted: AcceptOverlapped is null. bSuccess : {}, BytesTransferred : {}", bSuccess, bytesTransferred);
+        logger.LogError("IOSocketAcceptor", "OnIOCompleted: AcceptOverlapped is null. bSuccess : {}, BytesTransferred : {}", bSuccess, bytesTransferred);
         return;
     }
 
     if (!bSuccess)
     {
-        logger.LogError("SocketListener", "Accept failed");
+        logger.LogError("IOSocketAcceptor", "Accept failed");
         if (pAcceptOverlapped->AcceptSocket != INVALID_SOCKET)
         {
             ::closesocket(pAcceptOverlapped->AcceptSocket);
@@ -68,28 +68,30 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
     }
     else
     {
-        logger.LogInfo("SocketListener", "OnIOCompleted: Accept success. Socket : {}", pAcceptOverlapped->AcceptSocket);
+        logger.LogInfo("IOSocketAcceptor", "OnIOCompleted: Accept success. Socket : {}", pAcceptOverlapped->AcceptSocket);
 
-        SOCKET listenSocket = m_ListenerSocket.GetSocket();
-        if (SOCKET_ERROR == ::setsockopt(pAcceptOverlapped->AcceptSocket, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, reinterpret_cast<char*>(&listenSocket), sizeof(SOCKET)))
+
+        auto pSocket = std::make_shared<Socket>(pAcceptOverlapped->AcceptSocket);
+        // AcceptContext 업데이트
+        if (!pSocket->UpdateAcceptContext(m_ListenerSocket.GetSocket()))
         {
-            logger.LogError("SocketListener", "OnIOCompleted: setsockopt SO_UPDATE_ACCEPT_CONTEXT failed. Error: {}", ::WSAGetLastError());
-            ::closesocket(pAcceptOverlapped->AcceptSocket);
-
-            // 문제.
-
-            // TODO: 1. SO_REUSE_ADDR 설정
-            // TODO: 2. TCP_NODELAY 설정
-            // TODO: 3. Zero-copy 설정 (Send/Recv 버퍼 0으로 설정) 
-            //  TIPS: IOCP 모델에서 전송 완료 시점까지 버퍼 관리를 완벽히 할 수 있을 때만 사용
+            logger.LogError("IOSocketAcceptor", "OnIOCompleted: UpdateAcceptContext failed. Error: {}", ::WSAGetLastError());
+            pSocket->Close();
+            return;
         }
-        else
-        {
-            std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(std::make_shared<Socket>(pAcceptOverlapped->AcceptSocket));
-            m_pIOService->Associate(pAcceptOverlapped->AcceptSocket, pInboundSession->GetCompletionId());
 
-            pInboundSession->OnAccepted();
-        }
+        // 최적화 설정 적용
+        // 1. Nagle Off (TCP_NODELAY)
+        pSocket->UpdateContextDisableNagleAlgorithm();
+        // 2. Zero-Copy (커널 버퍼 0)
+        pSocket->UpdateContextZeroCopy();
+        // 3. Keep-Alive (30초 유휴 후 1초 간격)
+        pSocket->UpdateContextKeepAlive(30000, 1000);
+
+        std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(pSocket);
+        m_pIOService->Associate(pAcceptOverlapped->AcceptSocket, pInboundSession->GetCompletionId());
+
+        pInboundSession->OnAccepted();
     }
 
     if (m_bExecuted)
@@ -97,7 +99,7 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
         // 3. 다시 AcceptEx 요청
         if (!BeginAcceptEx())
         {
-            logger.LogWarning("SocketListener", "Failed to post next accept.");
+            logger.LogWarning("IOSocketAcceptor", "Failed to post next accept.");
         }
     }
 
@@ -106,13 +108,13 @@ void IOSocketListener::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
 
 //------------------------------------------------------------------------ 
 
-bool IOSocketListener::Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount)
+bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
     // 1. IOService 시작
     if (!m_pIOService->Start(threadCount))
     {
-        logger.LogError("SocketListener", "IOService Start failed");
+        logger.LogError("IOSocketAcceptor", "IOService Start failed");
         Shutdown();
 
         return false;
@@ -121,7 +123,7 @@ bool IOSocketListener::Start(const unsigned short listenPort, const unsigned lon
     // 1. Listener를 위한 Socket 생성.
     if (!ListenSocket(listenPort, maxConnectionCount))
     {
-        logger.LogError("SocketListener", "ListenSocket is not valid.");
+        logger.LogError("IOSocketAcceptor", "ListenSocket is not valid.");
 
         Shutdown();
 
@@ -135,17 +137,17 @@ bool IOSocketListener::Start(const unsigned short listenPort, const unsigned lon
     {
         if (!BeginAcceptEx())
         {
-            logger.LogWarning("SocketListener", "Faile to post initial accept : {}", i);
+            logger.LogWarning("IOSocketAcceptor", "Faile to post initial accept : {}", i);
         }
 
     }
 
-    logger.LogInfo("SocketListener", "Started listening on port {} with {} threads.", listenPort, threadCount);
+    logger.LogInfo("IOSocketAcceptor", "Started listening on port {} with {} threads.", listenPort, threadCount);
 
     return true;
 }
 
-bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount)
+bool IOSocketAcceptor::ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
@@ -156,16 +158,15 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     m_ListenerSocket.SetLocalAddress(listenPort);
 
     // 2-1. SO_REUSEADDR 옵션 설정 (포트 재사용)
-    int optval = 1;
-    if (::setsockopt(m_ListenerSocket.GetSocket(), SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char*>(&optval), sizeof(optval)) == SOCKET_ERROR)
+    if (!m_ListenerSocket.UpdateContextReuseAddr(true))
     {
-        logger.LogWarning("SocketListener", "setsockopt SO_REUSEADDR failed. Error: {}", ::WSAGetLastError());
+        logger.LogWarning("IOSocketAcceptor", "SetReuseAddr failed. Error: {}", ::WSAGetLastError());
     }
 
     // 3.소켓 바인딩
     if (!m_ListenerSocket.Bind())
     {
-        logger.LogError("SocketListener", "Socket Bind failed.");
+        logger.LogError("IOSocketAcceptor", "Socket Bind failed.");
 
         return false;
     }
@@ -173,7 +174,7 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     // 4. IOCP에 소켓 연결
     if (!m_pIOService->Associate(m_ListenerSocket.GetSocket(), GetCompletionId()))
     {
-        logger.LogError("SocketListener", "failed to associate listen socket.");
+        logger.LogError("IOSocketAcceptor", "failed to associate listen socket.");
 
         Shutdown();
 
@@ -184,7 +185,7 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     // 5. 리스닝 시작
     if (!m_ListenerSocket.Listen(maxConnectionCount))
     {
-        logger.LogError("SocketListener", "Socket Listen failed.");
+        logger.LogError("IOSocketAcceptor", "Socket Listen failed.");
 
         return false;
     }
@@ -194,7 +195,7 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     DWORD dwBytes = 0;
     if (SOCKET_ERROR == ::WSAIoctl(m_ListenerSocket.GetSocket(), SIO_GET_EXTENSION_FUNCTION_POINTER, &guidAcceptEx, sizeof(guidAcceptEx), &m_lpfnAcceptEx, sizeof(m_lpfnAcceptEx), &dwBytes, nullptr, nullptr))
     {
-        logger.LogError("SocketListener", "Failed to get AcceptEx function. Error: {}", ::WSAGetLastError());
+        logger.LogError("IOSocketAcceptor", "Failed to get AcceptEx function. Error: {}", ::WSAGetLastError());
 
         Shutdown();
 
@@ -205,7 +206,7 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     GUID guidGetAcceptExSockaddrs = WSAID_GETACCEPTEXSOCKADDRS;
     if (SOCKET_ERROR == ::WSAIoctl(m_ListenerSocket.GetSocket(), SIO_GET_EXTENSION_FUNCTION_POINTER, &guidGetAcceptExSockaddrs, sizeof(guidGetAcceptExSockaddrs), &m_lpfnGetAcceptExSockaddrs, sizeof(m_lpfnGetAcceptExSockaddrs), &dwBytes, nullptr, nullptr))
     {
-        logger.LogError("SocketListener", "Failed to get GetAcceptExSockaddrs function. Error : {}", ::WSAGetLastError());
+        logger.LogError("IOSocketAcceptor", "Failed to get GetAcceptExSockaddrs function. Error : {}", ::WSAGetLastError());
         Shutdown();
 
         return false;
@@ -214,12 +215,12 @@ bool IOSocketListener::ListenSocket(const unsigned short listenPort, const unsig
     return true;
 }
 
-bool IOSocketListener::BeginAcceptEx()
+bool IOSocketAcceptor::BeginAcceptEx()
 {
     auto& logger = LibCommons::Logger::GetInstance();
     if (!m_bExecuted)
     {
-        logger.LogError("SocketListener", "BeginAcceptEx: Listener not started");
+        logger.LogError("IOSocketAcceptor", "BeginAcceptEx: Listener not started");
         return false;
     }
 
@@ -230,7 +231,7 @@ bool IOSocketListener::BeginAcceptEx()
     pAcceptOverlapped->AcceptSocket = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
     if (INVALID_SOCKET == pAcceptOverlapped->AcceptSocket)
     {
-        logger.LogError("SocketListener", "BeginAcceptEx: Failed to create accept socket. Error : {}", ::WSAGetLastError());
+        logger.LogError("IOSocketAcceptor", "BeginAcceptEx: Failed to create accept socket. Error : {}", ::WSAGetLastError());
         delete pAcceptOverlapped;
         return false;
     }
@@ -253,7 +254,7 @@ bool IOSocketListener::BeginAcceptEx()
         int nError = ::WSAGetLastError();
         if (ERROR_IO_PENDING != nError)
         {
-            logger.LogError("SocketListener", "BeginAcceptEx: AcceptEx failed. Error : {}", nError);
+            logger.LogError("IOSocketAcceptor", "BeginAcceptEx: AcceptEx failed. Error : {}", nError);
 
             ::closesocket(pAcceptOverlapped->AcceptSocket);
             delete pAcceptOverlapped;
@@ -261,7 +262,7 @@ bool IOSocketListener::BeginAcceptEx()
         }
     }
 
-    logger.LogDebug("SocketListener", "AcceptEx posted successfully.");
+    logger.LogDebug("IOSocketAcceptor", "AcceptEx posted successfully.");
 
     return true;
 }

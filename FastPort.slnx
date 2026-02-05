@@ -13,6 +13,12 @@
     <File Path="docs/PROJECT_STRUCTURE.md" />
     <File Path="docs/README_DOCS.md" />
   </Folder>
+  <Folder Name="/docs/benchmark/">
+    <File Path="docs/benchmark-results-01-baseline.md" />
+    <File Path="docs/benchmark-results-02-scatter-gather.md" />
+    <File Path="docs/benchmark-results-03-zero-copy-send.md" />
+    <File Path="docs/benchmark-results-04-socket-opt.md" />
+  </Folder>
   <Folder Name="/솔루션 항목/">
     <File Path=".editorconfig" />
     <File Path=".gitignore" />

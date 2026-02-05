@@ -3,12 +3,14 @@
 #include <vector>
 #include <algorithm>
 #include <cstring>
+#include <spdlog/spdlog.h>
 
 export module commons.buffers.circle_buffer_queue;
 
 import std;
 import commons.rwlock;
 import commons.buffers.ibuffer;
+import commons.logger;
 
 namespace LibCommons::Buffers
 {
@@ -39,6 +41,8 @@ public:
         const size_t size = data.size();
         if (m_Capacity - m_Size < size)
         {
+            LibCommons::Logger::GetInstance().LogError("CircleBufferQueue", "Write() Insufficient space. Requested Size : {}, Available Size : {}", size, m_Capacity - m_Size);
+
             return false;
         }
 
@@ -67,6 +71,7 @@ public:
         const size_t size = outBuffer.size();
         if (m_Size < size)
         {
+            LibCommons::Logger::GetInstance().LogError("CircleBufferQueue", "Pop() Insufficient data. Requested Size : {}, Available Size : {}", size, m_Size);
             return false;
         }
 
@@ -95,6 +100,8 @@ public:
         const size_t size = outBuffer.size();
         if (m_Size < size)
         {
+            LibCommons::Logger::GetInstance().LogError("CircleBufferQueue", "Peek() Insufficient data. Requested Size : {}, Available Size : {}", size, m_Size);
+
             return false;
         }
 
@@ -119,6 +126,7 @@ public:
 
         if (m_Size == 0)
         {
+            LibCommons::Logger::GetInstance().LogError("CircleBufferQueue", "GetReadBuffers() Buffer is empty.");
             return 0;
         }
 
@@ -143,12 +151,14 @@ public:
 
         if (m_Capacity - m_Size < size)
         {
+            LibCommons::Logger::GetInstance().LogError("CircleBufferQueue", "AllocateWrite() Insufficient space. Requested Size : {}, Available Size : {}", size, m_Capacity - m_Size);
+
             return false;
         }
 
         size_t writeIndex = m_Head;
         size_t firstPart = std::min(size, m_Capacity - writeIndex);
-        
+
         // reinterpret_cast to std::byte*
         std::byte* bufferData = reinterpret_cast<std::byte*>(m_Buffer.data());
 
@@ -210,12 +220,13 @@ public:
         const size_t freeSpace = m_Capacity - m_Size;
         if (freeSpace == 0)
         {
+            LibCommons::Logger::GetInstance().LogError("CircleBufferQueue", "GetWriteableBuffers() Buffer is full.");
             return 0;
         }
 
         size_t writeIndex = m_Head;
         size_t firstPart = std::min(freeSpace, m_Capacity - writeIndex);
-        
+
         std::byte* bufferData = reinterpret_cast<std::byte*>(m_Buffer.data());
         outBuffers.emplace_back(std::span(bufferData + writeIndex, firstPart));
 
@@ -232,7 +243,7 @@ public:
     bool CommitWrite(size_t size) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
-        
+
         if (m_Capacity - m_Size < size)
         {
             // 이론상 발생하면 안 됨 (GetWriteableBuffers 이후라면)
@@ -241,7 +252,7 @@ public:
 
         m_Head = (m_Head + size) % m_Capacity;
         m_Size += size;
-        
+
         return true;
     }
 

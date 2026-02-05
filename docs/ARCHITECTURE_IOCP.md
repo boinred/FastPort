@@ -15,7 +15,7 @@ graph TB
     end
 
     subgraph Network["Network Core Layer"]
-        Listener[IOSocketListener<br/>AcceptEx]
+        Listener[IOSocketListener<br/>AcceptEx]     
         Connector[IOSocketConnector<br/>ConnectEx]
         IOSession[IOSession<br/>WSARecv/WSASend]
         Framer[PacketFramer]
@@ -151,18 +151,28 @@ sequenceDiagram
     participant Framer as PacketFramer
     participant App as OnPacketReceived
 
-    Session->>Kernel: WSARecv() 비동기 요청
-    Note over Session: m_RecvInProgress = true
+    %% 1. Zero-byte Recv (알림 대기)
+    Session->>Kernel: WSARecv(len=0) 비동기 요청 (Zero-byte)
+    Note over Session: m_RecvInProgress = true (ZeroByte Mode)
 
-    Kernel-->>IOCP: Recv 완료 통지
+    Kernel-->>IOCP: Recv 완료 통지 (0 bytes)
+    IOCP-->>Session: OnIOCompleted()
+    
+    Note over Session: 데이터 도착 확인
+
+    %% 2. Real Recv (데이터 수신)
+    Session->>Kernel: WSARecv(Real Buffer) 비동기 요청
+    Note over Session: m_RecvInProgress = true (Real Mode)
+
+    Kernel-->>IOCP: Recv 완료 통지 (N bytes)
     IOCP-->>Session: OnIOCompleted()
     Session->>Session: m_RecvInProgress = false
-    Session->>Buffer: Write(data, bytes)
+    Session->>Buffer: CommitWrite(bytes)
     
     loop 패킷 파싱
-        Session->>Framer: TryPop(buffer)
+        Session->>Framer: TryFrameFromBuffer(buffer)
         alt Ok
-            Framer-->>Session: Packet
+            Framer-->>Session: PacketFrame
             Session->>App: OnPacketReceived(packet)
         else NeedMore
             Framer-->>Session: NeedMore
@@ -173,7 +183,8 @@ sequenceDiagram
         end
     end
 
-    Session->>Kernel: WSARecv() 다시 요청
+    %% 3. 다시 Zero-byte Recv 대기
+    Session->>Kernel: WSARecv(len=0) 비동기 요청
 ```
 
 ### Send 흐름
@@ -187,20 +198,28 @@ sequenceDiagram
     participant Kernel as Windows Kernel
 
     App->>Session: SendMessage(packetId, message)
-    Session->>Session: Packet 생성
-    Session->>Buffer: Write(rawData)
+    
+    Note over Session, Buffer: 1. Zero-Copy Serialization
+    Session->>Buffer: AllocateWrite(size) -> Direct Span
+    Session->>Buffer: Serialize directly to Buffer Span
+    
     Session->>Session: TryPostSendFromQueue()
 
     alt m_SendInProgress == false
         Session->>Session: m_SendInProgress = true
-        Session->>Buffer: Peek(data)
-        Session->>Kernel: WSASend() 비동기 요청
+        
+        Note over Session, Kernel: 2. Scatter-Gather I/O
+        Session->>Buffer: GetReadBuffers() -> std::vector<span<byte>>
+        Session->>Session: Construct WSABUF[] from spans
+        Session->>Kernel: WSASend(WSABUF[]) 비동기 요청
     else m_SendInProgress == true
         Note over Session: 대기 (기존 Send 완료 후 처리)
     end
 
     Kernel-->>IOCP: Send 완료 통지
     IOCP-->>Session: OnIOCompleted()
+    
+    Note over Session, Buffer: 3. Delayed Consume
     Session->>Buffer: Consume(bytes)
     Session->>Session: m_SendInProgress = false
 
@@ -304,4 +323,17 @@ for (int i = 0; i < PRE_ACCEPT_COUNT; ++i)
 // Send는 1개만 outstanding
 if (!m_SendInProgress.compare_exchange_strong(expected, true))
     return;
+
+```
+
+### 4. Send/Recv 최적화
+```cpp
+// Send: 링버퍼 직접 참조 (No Intermediate Copy)
+WSABUF bufs[N];
+for(auto& span : ring_buffer_spans)
+    bufs[i] = { len, span.data };
+WSASend(bufs);
+
+// Recv: Zero-byte Recv (No Kernel Locking for idle connections)
+WSARecv(len=0); // Notification only
 ```

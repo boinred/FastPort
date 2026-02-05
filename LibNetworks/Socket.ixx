@@ -78,10 +78,28 @@ public:
         return const_cast<SOCKET&>(rfThis.GetSocket());
     }
 
+    // ConnectEx 호출 후 Connect Context 업데이트
     bool UpdateConnectContext() const;
-    bool UpdateNoDelayContext() const; 
+
+    // AcceptEx 호출 후 Accept Context 업데이트
+    bool UpdateAcceptContext(SOCKET listenSocket) const;
+
+    // Nagle 알고리즘 비활성화 설정 (TCP_NODELAY)
+    bool UpdateContextDisableNagleAlgorithm() const;
+
+    // Zero-Copy 설정 (커널 버퍼 0)
+    bool UpdateContextZeroCopy() const;
+
+    // TCP Keep-Alive 설정
+    bool UpdateContextKeepAlive(unsigned long idleMs, unsigned long intervalMs) const;
+
+    // SO_LINGER 설정
+    bool UpdateContextLingerConfig(bool onOff, unsigned short lingerTime) const;
+
+    // Reuse Address 설정
+    bool UpdateContextReuseAddr(bool bReuse) const;
 private:
-    SOCKET m_Socket = INVALID_SOCKET;
+    mutable SOCKET m_Socket = INVALID_SOCKET;
     sockaddr_in m_SockAddr = {};
 };
 
