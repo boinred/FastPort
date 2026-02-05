@@ -209,7 +209,7 @@ bool Socket::UpdateContextKeepAlive(unsigned long idleMs, unsigned long interval
     return true;
 }
 
-bool Socket::SetLingerConfig(bool onOff, unsigned short lingerTime) const
+bool Socket::UpdateContextLingerConfig(bool onOff, unsigned short lingerTime) const
 {
     linger ling;
     ling.l_onoff = onOff ? 1 : 0;
@@ -223,7 +223,7 @@ bool Socket::SetLingerConfig(bool onOff, unsigned short lingerTime) const
     return true;
 }
 
-bool Socket::SetReuseAddr(bool bReuse) const
+bool Socket::UpdateContextReuseAddr(bool bReuse) const
 {
     BOOL val = bReuse ? TRUE : FALSE;
     if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val)))

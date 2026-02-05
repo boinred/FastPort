@@ -1,11 +1,14 @@
 ﻿#include "CppUnitTest.h"
 #include <vector>
 #include <cstdint>
+#include <array>
+#include <span>
 #include <WinSock2.h> // For htons
 
 #pragma comment(lib, "ws2_32.lib")
 
-import std;
+ import std; 
+
 import networks.core.packet_framer;
 import networks.core.packet;
 import commons.buffers.circle_buffer_queue;

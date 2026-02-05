@@ -94,12 +94,12 @@ public:
     bool UpdateContextKeepAlive(unsigned long idleMs, unsigned long intervalMs) const;
 
     // SO_LINGER 설정
-    bool SetLingerConfig(bool onOff, unsigned short lingerTime) const;
+    bool UpdateContextLingerConfig(bool onOff, unsigned short lingerTime) const;
 
     // Reuse Address 설정
-    bool SetReuseAddr(bool bReuse) const;
+    bool UpdateContextReuseAddr(bool bReuse) const;
 private:
-    SOCKET m_Socket = INVALID_SOCKET;
+    mutable SOCKET m_Socket = INVALID_SOCKET;
     sockaddr_in m_SockAddr = {};
 };
 

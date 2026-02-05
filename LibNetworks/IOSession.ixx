@@ -82,6 +82,9 @@ private:
         // 이번 요청 바이트 수.
         size_t RequestedBytes = 0;
 
+        // Zero-byte Recv 여부 (Recv Overlapped 전용)
+        bool IsZeroByte = false;
+
         // OVERLAPPED 재사용을 위한 초기화.
         void ResetOverlapped()
         {
@@ -90,8 +93,11 @@ private:
     };
 
 private:
-    // 비동기 수신(WSARecv) 등록.
-    bool PostRecv();
+    // 비동기 0바이트 수신(WSARecv) 등록.
+    bool PostZeroByteRecv();
+
+    // 실제 데이터 수신(WSARecv) 등록.
+    bool PostRealRecv();
 
     // 송신 큐 기반 비동기 송신(WSASend) 등록.
     bool TryPostSendFromQueue();

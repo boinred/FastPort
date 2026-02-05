@@ -158,7 +158,7 @@ bool IOSocketAcceptor::ListenSocket(const unsigned short listenPort, const unsig
     m_ListenerSocket.SetLocalAddress(listenPort);
 
     // 2-1. SO_REUSEADDR 옵션 설정 (포트 재사용)
-    if (!m_ListenerSocket.SetReuseAddr(true))
+    if (!m_ListenerSocket.UpdateContextReuseAddr(true))
     {
         logger.LogWarning("IOSocketAcceptor", "SetReuseAddr failed. Error: {}", ::WSAGetLastError());
     }
