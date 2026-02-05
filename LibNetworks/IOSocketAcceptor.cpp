@@ -70,19 +70,28 @@ void IOSocketAcceptor::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
     {
         logger.LogInfo("IOSocketAcceptor", "OnIOCompleted: Accept success. Socket : {}", pAcceptOverlapped->AcceptSocket);
 
-        SOCKET listenSocket = m_ListenerSocket.GetSocket();
-        if (SOCKET_ERROR == ::setsockopt(pAcceptOverlapped->AcceptSocket, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, reinterpret_cast<char*>(&listenSocket), sizeof(SOCKET)))
-        {
-            logger.LogError("IOSocketAcceptor", "OnIOCompleted: setsockopt SO_UPDATE_ACCEPT_CONTEXT failed. Error: {}", ::WSAGetLastError());
-            ::closesocket(pAcceptOverlapped->AcceptSocket);
-        }
-        else
-        {
-            std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(std::make_shared<Socket>(pAcceptOverlapped->AcceptSocket));
-            m_pIOService->Associate(pAcceptOverlapped->AcceptSocket, pInboundSession->GetCompletionId());
 
-            pInboundSession->OnAccepted();
+        auto pSocket = std::make_shared<Socket>(pAcceptOverlapped->AcceptSocket);
+        // AcceptContext 업데이트
+        if (!pSocket->UpdateAcceptContext(m_ListenerSocket.GetSocket()))
+        {
+            logger.LogError("IOSocketAcceptor", "OnIOCompleted: UpdateAcceptContext failed. Error: {}", ::WSAGetLastError());
+            pSocket->Close();
+            return;
         }
+
+        // 최적화 설정 적용
+        // 1. Nagle Off (TCP_NODELAY)
+        pSocket->UpdateContextDisableNagleAlgorithm();
+        // 2. Zero-Copy (커널 버퍼 0)
+        pSocket->UpdateContextZeroCopy();
+        // 3. Keep-Alive (30초 유휴 후 1초 간격)
+        pSocket->UpdateContextKeepAlive(30000, 1000);
+
+        std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(pSocket);
+        m_pIOService->Associate(pAcceptOverlapped->AcceptSocket, pInboundSession->GetCompletionId());
+
+        pInboundSession->OnAccepted();
     }
 
     if (m_bExecuted)
@@ -149,10 +158,9 @@ bool IOSocketAcceptor::ListenSocket(const unsigned short listenPort, const unsig
     m_ListenerSocket.SetLocalAddress(listenPort);
 
     // 2-1. SO_REUSEADDR 옵션 설정 (포트 재사용)
-    int optval = 1;
-    if (::setsockopt(m_ListenerSocket.GetSocket(), SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char*>(&optval), sizeof(optval)) == SOCKET_ERROR)
+    if (!m_ListenerSocket.SetReuseAddr(true))
     {
-        logger.LogWarning("IOSocketAcceptor", "setsockopt SO_REUSEADDR failed. Error: {}", ::WSAGetLastError());
+        logger.LogWarning("IOSocketAcceptor", "SetReuseAddr failed. Error: {}", ::WSAGetLastError());
     }
 
     // 3.소켓 바인딩

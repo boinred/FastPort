@@ -2,6 +2,7 @@
 
 #include <WS2tcpip.h>
 #include <MSWSock.h>
+#include <mstcpip.h>
 //  message : IFC 가져오기가 감지되었습니다. 발생함으로 추가.
 #include <spdlog/spdlog.h>
 #pragma comment(lib, "ws2_32.lib")
@@ -143,7 +144,7 @@ bool Socket::UpdateConnectContext() const
     return true;
 }
 
-bool Socket::UpdateNoDelayContext() const
+bool Socket::UpdateContextDisableNagleAlgorithm() const
 {
     // Nagle 알고리즘 비활성화 (TCP_NODELAY 설정)
     BOOL bNoDelay = TRUE; // 켜기 (Nagle 끄기)
@@ -162,6 +163,84 @@ bool Socket::UpdateNoDelayContext() const
         return false;
     }
 
+    return true;
+}
+
+bool Socket::UpdateContextZeroCopy() const
+{
+    int zero = 0;
+    // 수신 버퍼 0 (Zero-copy Recv)
+    if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_RCVBUF, (const char*)&zero, sizeof(zero)))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "SetZeroCopyConfig: setsockopt(SO_RCVBUF) failed. Error: {}", ::WSAGetLastError());
+        return false;
+    }
+
+    // 송신 버퍼 0 (Zero-copy Send)
+    if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_SNDBUF, (const char*)&zero, sizeof(zero)))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "SetZeroCopyConfig: setsockopt(SO_SNDBUF) failed. Error: {}", ::WSAGetLastError());
+        return false;
+    }
+
+    return true;
+}
+
+bool Socket::UpdateContextKeepAlive(unsigned long idleMs, unsigned long intervalMs) const
+{
+    BOOL on = TRUE;
+    if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_KEEPALIVE, (const char*)&on, sizeof(on)))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "SetKeepAliveConfig: setsockopt(SO_KEEPALIVE) failed. Error: {}", ::WSAGetLastError());
+        return false;
+    }
+
+    tcp_keepalive alive;
+    alive.onoff = 1;
+    alive.keepalivetime = idleMs;        // 유휴 시간 후 첫 탐색 시작
+    alive.keepaliveinterval = intervalMs; // 응답 없을 시 재시도 간격
+
+    DWORD dwBytes = 0;
+    if (SOCKET_ERROR == ::WSAIoctl(m_Socket, SIO_KEEPALIVE_VALS, &alive, sizeof(alive), nullptr, 0, &dwBytes, nullptr, nullptr))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "SetKeepAliveConfig: WSAIoctl(SIO_KEEPALIVE_VALS) failed. Error: {}", ::WSAGetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool Socket::SetLingerConfig(bool onOff, unsigned short lingerTime) const
+{
+    linger ling;
+    ling.l_onoff = onOff ? 1 : 0;
+    ling.l_linger = lingerTime;
+
+    if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_LINGER, (const char*)&ling, sizeof(ling)))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "SetLingerConfig: setsockopt(SO_LINGER) failed. Error: {}", ::WSAGetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool Socket::SetReuseAddr(bool bReuse) const
+{
+    BOOL val = bReuse ? TRUE : FALSE;
+    if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_REUSEADDR, (const char*)&val, sizeof(val)))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "SetReuseAddr: setsockopt(SO_REUSEADDR) failed. Error: {}", ::WSAGetLastError());
+        return false;
+    }
+    return true;
+}
+
+bool Socket::UpdateAcceptContext(SOCKET listenSocket) const
+{
+    if (SOCKET_ERROR == ::setsockopt(m_Socket, SOL_SOCKET, SO_UPDATE_ACCEPT_CONTEXT, reinterpret_cast<char*>(&listenSocket), sizeof(SOCKET)))
+    {
+        LibCommons::Logger::GetInstance().LogError("Socket", "UpdateAcceptContext: setsockopt SO_UPDATE_ACCEPT_CONTEXT failed. Error: {}", ::WSAGetLastError());
+        return false;
+    }
     return true;
 }
 
