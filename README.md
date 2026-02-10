@@ -12,7 +12,7 @@ C++20 모듈을 활용하여 구현한 확장 가능한 네트워크 서버/클�
 |------|------|
 | **목적** | IOCP 기반 고성능 비동기 네트워킹 프레임워크 설계 및 구현 |
 | **유형** | 개인 프로젝트 |
-| **개발 환경** | Windows, Visual Studio 2022+, C++20 |
+| **개발 환경** | Windows, Visual Studio 2022 (v143+), C++20 |
 
 ---
 
@@ -120,6 +120,8 @@ FastPort/
 ├─ FastPortBenchmark/        # 성능 벤치마크 도구
 │  ├─ FastPortBenchmark.cpp
 │  ├─ LatencyBenchmarkRunner.*
+│  ├─ BenchmarkRunner.h
+│  ├─ BenchmarkStats.h
 │  └─ BenchmarkSession.ixx
 │
 ├─ LibNetworks/              # 네트워크 코어 라이브러리
@@ -128,7 +130,7 @@ FastPort/
 │  ├─ IOConsumer.ixx         # IOCP Completion 인터페이스
 │  ├─ IOSocketListener.*     # AcceptEx 기반 리스너
 │  ├─ IOSocketConnector.*    # ConnectEx 기반 커넥터
-│  ├─ IOSession.*            # 세션 I/O 처리
+│  ├─ IOSession.*            # 세션 I/O 처리 (Zero-Byte Recv, SG I/O)
 │  ├─ Packet.ixx             # 패킷 구조체
 │  ├─ PacketFramer.ixx       # TCP 스트림 패킷 분리
 │  ├─ InboundSession.*       # 서버 세션 베이스
@@ -140,7 +142,11 @@ FastPort/
 │  ├─ ThreadPool.ixx         # 스레드 풀
 │  ├─ EventListener.ixx      # 이벤트 리스너 (작업 큐)
 │  ├─ IBuffer.ixx            # 버퍼 인터페이스
-│  └─ CircleBufferQueue.ixx  # 원형 버퍼 구현체
+│  ├─ CircleBufferQueue.ixx  # 원형 버퍼 구현체
+│  ├─ Container.ixx          # 타입 안전 컨테이너 유틸리티
+│  ├─ SingleTon.ixx          # 싱글톤 템플릿
+│  ├─ StrConverter.ixx       # 문자열 변환 유틸리티
+│  └─ ServiceMode.ixx        # 서비스 실행 모드 정의
 │
 ├─ Protocols/                # Protocol Buffers 생성 파일
 │  └─ *.pb.h, *.pb.cc
@@ -150,11 +156,10 @@ FastPort/
 │  ├─ Tests.proto
 │  └─ Benchmark.proto
 │
-├─ docs/                     # 프로젝트 문서
+├─ docs/                     # 프로젝트 상세 문서
 │
-└─ Tests/                    # 단위 테스트
-   ├─ LibCommonsTests/
-   └─ LibNetworksTests/
+└─ LibCommonsTests/          # 단위 테스트
+└─ LibNetworksTests/
 ```
 
 ---
@@ -163,87 +168,40 @@ FastPort/
 
 ### 1. IOCP 기반 비동기 I/O 처리
 
-```mermaid
-sequenceDiagram
-    participant App as Application
-    participant IO as IOService
-    participant IOCP as IOCP Kernel
-    participant Worker as Worker Thread
+- `IOService`: IOCP 핸들 생성 및 하드웨어 동시성 기반 워커 스레드 풀 관리
+- `IIOConsumer`: I/O 완료 통지를 처리하는 인터페이스 기반 설계로 확장성 확보
+- `OVERLAPPED` 확장 구조체를 멤버 변수로 관리하여 런타임 힙 할당 최소화
 
-    App->>IO: Start(numThreads)
-    IO->>IOCP: CreateIoCompletionPort()
-    loop Worker Threads
-        IO->>Worker: spawn thread
-        Worker->>IOCP: GetQueuedCompletionStatus()
-        IOCP-->>Worker: Completion Event
-        Worker->>App: OnIOCompleted()
-    end
-```
+### 2. 비동기 Accept/Connect (AcceptEx / ConnectEx)
 
-- `IOService`: IOCP 핸들 생성 및 워커 스레드 풀 관리
-- `IIOConsumer`: Completion 이벤트 콜백 인터페이스로 확장성 확보
-- 하드웨어 동시성 기반 스레드 수 자동 조정
+- **Pre-posted Accept**: 서버 시작 시 대량의 `AcceptEx`를 미리 게시하여 연결 수락 지연 최소화
+- **ConnectEx**: 클라이언트 연결 과정까지 완전 비동기로 처리하여 메인 스레드 블로킹 방지
 
-### 2. 비동기 Accept/Connect
+### 3. 세션 관리 및 전송 보장
 
-- **AcceptEx**: Pre-posted accept로 연결 수락 지연 최소화
-- **ConnectEx**: 비동기 연결로 블로킹 없는 클라이언트 구현
+- **1-Outstanding Send**: `atomic` 플래그를 사용하여 세션당 하나의 송신 요청만 활성화, 순차 전송 보장 및 커널 리소스 절약
+- **Delayed Consume**: 실제 I/O 완료가 확인된 시점에 송신 버퍼 데이터를 소비(Consume)하여 안정성 확보
 
-### 3. 세션 관리 및 메모리 최적화
+### 4. 고성능 수신 최적화 (Zero-Byte Recv)
 
-- `OVERLAPPED` 구조체 멤버 변수 재사용으로 힙 할당 최소화
-- `m_SendInProgress` atomic 플래그로 동시 전송 1개 유지 (순차 전송 보장)
-- Send/Recv 버퍼를 인터페이스(`IBuffer`)로 분리하여 DI 패턴 적용
+- **Zero-Byte Recv**: 데이터가 없는 유휴 세션에 대해 0바이트 수신 요청을 걸어두어 커널의 페이지 잠금(Page Locking) 리소스 낭비 방지
+- 알림 수신 시에만 실제 버퍼를 할당/연결하여 대규모 동시 접속 환경에서 메모리 효율 극대화
 
-### 4. TCP 스트림 패킷 프레이밍
+### 5. Scatter-Gather I/O (WSABUF)
 
-```mermaid
-stateDiagram-v2
-    [*] --> WaitHeader: 데이터 수신
-    WaitHeader --> WaitHeader: canRead < 4
-    WaitHeader --> ValidateHeader: canRead >= 4
-    ValidateHeader --> Invalid: size < 4 or size > MAX
-    ValidateHeader --> WaitPayload: size valid
-    WaitPayload --> WaitPayload: canRead < packetSize
-    WaitPayload --> ParsePacket: canRead >= packetSize
-    ParsePacket --> OnPacketReceived: Packet 생성
-    OnPacketReceived --> WaitHeader: 다음 패킷
-    Invalid --> Disconnect: 연결 종료
-```
-
-- `PacketFramer`: TCP 스트림에서 패킷 단위 분리
-- `PacketFrameResult`: `Ok` / `NeedMore` / `Invalid` 3상태 분리
-- Network Byte Order (Big-Endian) 헤더 처리 (`htons`/`ntohs`)
-
-### 5. 원형 버퍼 큐 (CircleBufferQueue)
-
-- `Write/Peek/Pop/Consume` 기반 스트림 처리
-- `RWLock`을 통한 스레드 안전성 보장
-- 메모리 재할당 없이 연속적인 데이터 처리
+- **Zero-Copy 송수신**: 링 버퍼의 데이터가 물리적으로 쪼개져 있는 경우에도 임시 복사본을 만들지 않고 `WSABUF` 배열을 통해 커널에 직접 전달
 
 ### 6. 계층 분리 설계
 
 | 계층 | 역할 | 주요 클래스 |
 |------|------|------------|
-| Application | 비즈니스 로직 | `FastPortServer`, `FastPortClient`, `FastPortBenchmark` |
-| Session | 세션 상태 관리 | `InboundSession`, `OutboundSession` |
-| Network Core | I/O 처리 | `IOSession`, `PacketFramer`, `Packet` |
-| IOCP Service | 스레드 관리 | `IOService`, `IIOConsumer` |
-| Common | 공용 유틸 | `IBuffer`, `Logger`, `ThreadPool` |
+| Application | 비즈니스 로직 및 서비스 구동 | `FastPortServer`, `FastPortClient`, `FastPortBenchmark` |
+| Session | 세션 상태 및 도메인 로직 관리 | `InboundSession`, `OutboundSession` |
+| Network Core | Winsock 추상화 및 I/O 수행 | `IOSession`, `PacketFramer`, `Socket` |
+| IOCP Service | 시스템 레벨 I/O 관리 | `IOService`, `IIOConsumer` |
+| Common | 기반 기술 및 유틸리티 | `IBuffer`, `Logger`, `ThreadPool`, `EventListener` |
 
 ---
-
-### 7. 주요 성능 최적화 기법
-
-|기법 | 설명 |
-|------|----|
-| Zero-Byte Recv |	알림 전용 WSARecv로 유휴 소켓 커널 잠금 방지 |
-| Scatter-Gather I/O |	링 버퍼 span을 WSABUF[]로 직접 전달 (복사 제거) |
-| Pre-posted Accept |	100개 AcceptEx 사전 게시로 수락 지연 최소화 |
-| TCP_NODELAY |	Nagle 알고리즘 비활성화 (저지연) |
-| SO_RCVBUF/SNDBUF=0 |	커널 버퍼링 제거 (Zero-Copy) |
-| Atomic CAS |	뮤텍스 없이 1-outstanding 전송 보장 |
-| OVERLAPPED 재사용 |	멤버 변수로 힙 할당 회피 |
 
 ## 🔧 빌드 및 실행
 
@@ -251,102 +209,52 @@ stateDiagram-v2
 
 - Windows 10 이상
 - Visual Studio 2022 이상
-- C++20 지원 컴파일러
 - vcpkg (패키지 관리)
 
 ### 의존성 설치
 
 ```bash
-vcpkg install spdlog:x64-windows
-vcpkg install protobuf:x64-windows
-vcpkg install grpc:x64-windows
+vcpkg install spdlog protobuf grpc cxxopts
 ```
 
 ### 빌드
 
-1. `FastPort.slnx` 솔루션 파일 열기
-2. 빌드 구성 선택 (Debug/Release, x64)
-3. 솔루션 빌드 (Ctrl+Shift+B)
-
-### 실행
-
-```powershell
-# 서버 실행
-.\FastPortServer.exe
-
-# 클라이언트 실행 (별도 터미널)
-.\FastPortClient.exe
-
-# 벤치마크 실행 (별도 터미널)
-.\FastPortBenchmark.exe --iterations 10000 --output results.csv
-```
+1. `FastPort.slnx` 솔루션 파일 열기 (Visual Studio 2022 17.10+ 권장)
+2. `x64` 플랫폼 및 `Release` 구성을 권장
+3. 전체 빌드 수행 (Ctrl+Shift+B)
 
 ---
 
-## 📊 벤치마크
+## 📊 벤치마크 및 결과
 
-네트워크 성능 측정을 위한 벤치마크 도구가 포함되어 있습니다.
+성능 최적화 단계별 벤치마크 결과는 `docs/` 내 문서에서 확인할 수 있습니다.
 
-### 측정 항목
-
-| 지표 | 설명 |
-|------|------|
-| **Latency (RTT)** | 요청-응답 왕복 시간 |
-| **Throughput** | 초당 패킷/바이트 처리량 |
-| **P50/P90/P95/P99** | 백분위 레이턴시 |
-
-### 사용법
-
-```powershell
-# 기본 실행
-FastPortBenchmark.exe
-
-# 옵션 지정
-FastPortBenchmark.exe --host 127.0.0.1 --port 9000 --iterations 10000 --payload 64
-
-# CSV 출력 (타임스탬프 자동 추가)
-FastPortBenchmark.exe --output results.csv
-# → results_2024-01-15-14-30.csv 생성
-```
-
-자세한 내용은 [벤치마크 가이드](docs/BENCHMARK_GUIDE.md)를 참조하세요.
+- [01. Baseline 측정](docs/benchmark-results-01-baseline.md)
+- [02. Scatter-Gather 적용 결과](docs/benchmark-results-02-scatter-gather.md)
+- [03. Zero-Copy Send 적용 결과](docs/benchmark-results-03-zero-copy-send.md)
 
 ---
 
-## 📚 문서
+## 📚 상세 문서
 
 | 문서 | 설명 |
 |------|------|
-| [프로젝트 구조](docs/PROJECT_STRUCTURE.md) | 디렉터리 및 파일 구조 |
-| [모듈 의존성](docs/MODULE_DEPENDENCIES.md) | C++20 모듈 의존성 다이어그램 |
-| [IOCP 아키텍처](docs/IOCP_ARCHITECTURE.md) | IOCP 기반 비동기 I/O 구조 |
-| [패킷 프로토콜](docs/PACKET_PROTOCOL.md) | 패킷 포맷 및 프로토콜 명세 |
-| [빌드 가이드](docs/BUILD_GUIDE.md) | 빌드 및 실행 방법 |
+| [프로젝트 구조](docs/PROJECT_STRUCTURE.md) | 상세 디렉터리 및 파일 역할 정의 |
+| [IOCP 아키텍처](docs/ARCHITECTURE_IOCP.md) | 상세 설계 및 I/O 흐름도 |
+| [패킷 프로토콜](docs/PACKET_PROTOCOL.md) | 헤더 구조 및 직렬화 방식 명세 |
+| [모듈 의존성](docs/MODULE_DEPENDENCIES.md) | C++20 모듈 간 참조 관계 |
+| [빌드 가이드](docs/BUILD_GUIDE.md) | 환경 설정 및 트러블슈팅 |
 | [벤치마크 가이드](docs/BENCHMARK_GUIDE.md) | 성능 측정 도구 사용법 |
-| [C++ 최신 기능 활용](docs/CPP_MODERN_FEATURES.md) | C++20/23 최적화 포인트 |
-
----
-
-## 📈 기술적 의사결정
-
-| 결정 사항 | 선택 | 이유 |
-|-----------|------|------|
-| 비동기 모델 | IOCP | Windows 환경 최고 성능의 비동기 I/O 모델 |
-| 모듈 시스템 | C++20 Modules | 컴파일 시간 단축, 명확한 인터페이스 분리 |
-| 버퍼 설계 | 원형 버퍼 + 인터페이스 | 메모리 효율성 및 구현체 교체 용이성 |
-| 패킷 엔디안 | Network Byte Order | 플랫폼 독립적 통신, 표준 준수 |
-| 동기화 | SRWLock + atomic | 읽기 작업 빈번 시 성능 우위, lock-free 패턴 |
-| 직렬화 | Protocol Buffers | 언어 중립적, 효율적인 바이너리 직렬화 |
+| [C++ 현대적 기능 활용](docs/CPP_MODERN_FEATURES.md) | 사용된 C++20/23 기능 설명 |
 
 ---
 
 ## 🚀 향후 개선 계획
 
-- [ ] Zero-copy Send 최적화 (scatter-gather I/O)
-- [ ] 세션 매니저 구현 (멀티 세션 관리, 브로드캐스트)
-- [ ] Graceful Shutdown 처리 (pending I/O cancel)
-- [ ] 암호화 레이어 추가 (TLS/SSL)
-- [ ] C++20/23 최신 기능 적용 (`std::span`, `std::expected` 등)
+- [ ] **RIO (Registered I/O) 지원**: Windows 최신 고성능 I/O API 적용 ([ARCHITECTURE_RIO.md](docs/ARCHITECTURE_RIO.md))
+- [ ] **세션 매니저 고도화**: 멀티 코어 대응 세션 맵 분할 및 브로드캐스트 최적화
+- [ ] **메모리 풀 (Object Pool)**: 세션 및 패킷 객체 재사용을 통한 GC 부하 감소
+- [ ] **TLS/SSL 지원**: 보안 전송 레이어 통합
 
 ---
 
