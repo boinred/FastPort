@@ -13,7 +13,7 @@ import networks.core.io_consumer;
 import networks.core.socket; 
 
 import networks.sessions.inetwork_session;
-import networks.core.inetwork_service;
+import networks.services.inetwork_service;
 
 
 namespace LibNetworks::Core
@@ -25,14 +25,14 @@ public:
     using OnDoFuncCreateSession = std::function<std::shared_ptr<Sessions::INetworkSession>(const std::shared_ptr<Core::Socket>&)>;
 
     static std::shared_ptr<IOSocketConnector> Create(
-        const std::shared_ptr<INetworkService>& pService,
+        const std::shared_ptr<Services::INetworkService>& pService,
         OnDoFuncCreateSession pOnDoFuncCreateSession,
         std::string ip, unsigned short port
     );
 
     IOSocketConnector() = delete;
 
-    explicit IOSocketConnector(const std::shared_ptr<INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession);
+    explicit IOSocketConnector(const std::shared_ptr<Services::INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession);
 
     void DisConnect();
 
@@ -51,7 +51,7 @@ private:
 
     std::shared_ptr<Socket> m_pSocket = std::make_shared<Socket>();
 
-    std::shared_ptr<INetworkService> m_pService{};
+    std::shared_ptr<Services::INetworkService> m_pService{};
 
     std::shared_ptr<Sessions::INetworkSession> m_pSession{};
 

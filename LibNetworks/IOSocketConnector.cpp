@@ -28,7 +28,7 @@ static bool UpdateSocketReuseAddr(SOCKET socket)
     return nRet == 0;
 }
 
-std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_ptr<INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession, std::string ip, unsigned short port)
+std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_ptr<Services::INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession, std::string ip, unsigned short port)
 {
     auto pConnector = std::make_shared<IOSocketConnector>(pService, pOnDoFuncCreateSession);
     if (!pConnector->Connect(ip, port))
@@ -42,7 +42,7 @@ std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_p
 
 
 
-IOSocketConnector::IOSocketConnector(const std::shared_ptr<INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession)
+IOSocketConnector::IOSocketConnector(const std::shared_ptr<Services::INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession)
     : m_pService(pService), m_pOnDoFuncCreateSession(pOnDoFuncCreateSession)
 {
 

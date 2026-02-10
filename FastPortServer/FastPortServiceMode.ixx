@@ -17,7 +17,7 @@ import commons.buffers.external_circle_buffer_queue;
 
 import networks.core.socket; 
 import networks.core.io_socket_acceptor;
-import networks.core.rio_service;
+import networks.services.rio_service;
 import networks.core.rio_buffer_manager;
 import networks.core.rio_extension;
 import networks.sessions.inbound_session;
@@ -107,7 +107,7 @@ private:
         dummy.Close();
 
         // 2. RIO 서비스 및 버퍼 매니저 초기화
-        m_RioService = std::make_shared<LibNetworks::Core::RIOService>();
+        m_RioService = std::make_shared<LibNetworks::Services::RIOService>();
         if (!m_RioService->Initialize(1024)) return;
 
         m_RioBufferManager = std::make_shared<LibNetworks::Core::RioBufferManager>();
@@ -178,7 +178,7 @@ private:
 
 
 
-    std::shared_ptr<LibNetworks::Core::RIOService> m_RioService{};
+    std::shared_ptr<LibNetworks::Services::RIOService> m_RioService{};
 
     std::shared_ptr<LibNetworks::Core::RioBufferManager> m_RioBufferManager{};
 

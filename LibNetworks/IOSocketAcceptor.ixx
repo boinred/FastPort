@@ -11,7 +11,7 @@ import networks.core.io_consumer;
 import networks.core.socket;
 
 import networks.sessions.inetwork_session;
-import networks.core.inetwork_service;
+import networks.services.inetwork_service;
 
 namespace LibNetworks::Core
 {
@@ -51,7 +51,7 @@ private:
 
 private:
     Core::Socket m_ListenerSocket = {};
-    std::shared_ptr<INetworkService> m_pService = {};
+    std::shared_ptr<Services::INetworkService> m_pService = {};
 
     bool m_bExecuted = {};
 

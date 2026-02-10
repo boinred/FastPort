@@ -6,12 +6,12 @@
 
 export module networks.services.io_service;
 
-import networks.core.inetwork_service;
+import networks.services.inetwork_service;
 import std;
 
 namespace LibNetworks::Services
 {
-export class IOService : public Core::INetworkService
+export class IOService : public INetworkService
 {
 public:
     IOService();

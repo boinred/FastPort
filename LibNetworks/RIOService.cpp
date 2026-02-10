@@ -4,14 +4,14 @@ module;
 #include <MSWSock.h>
 #include <thread>
 
-module networks.core.rio_service;
+module networks.services.rio_service;
 
 import networks.core.rio_extension;
 import networks.core.rio_context;
 import networks.sessions.rio_session;
 import commons.logger;
 
-namespace LibNetworks::Core
+namespace LibNetworks::Services
 {
 
 RIOService::~RIOService()
@@ -26,7 +26,7 @@ bool RIOService::Initialize(uint32_t maxCompletionResults)
         return true;
     }
 
-    m_CQ = RioExtension::GetTable().RIOCreateCompletionQueue(maxCompletionResults, nullptr);
+    m_CQ = Core::RioExtension::GetTable().RIOCreateCompletionQueue(maxCompletionResults, nullptr);
     if (m_CQ == RIO_INVALID_CQ)
     {
         return false;
@@ -68,7 +68,7 @@ void RIOService::Stop()
 
     if (m_CQ != RIO_INVALID_CQ)
     {
-        RioExtension::GetTable().RIOCloseCompletionQueue(m_CQ);
+        Core::RioExtension::GetTable().RIOCloseCompletionQueue(m_CQ);
         m_CQ = RIO_INVALID_CQ;
     }
 }
@@ -80,7 +80,7 @@ void RIOService::WorkerLoop()
 
     while (m_bIsRunning)
     {
-        ULONG count = RioExtension::GetTable().RIODequeueCompletion(m_CQ, results, MAX_RESULTS);
+        ULONG count = Core::RioExtension::GetTable().RIODequeueCompletion(m_CQ, results, MAX_RESULTS);
 
         if (count == 0)
         {
@@ -102,7 +102,7 @@ void RIOService::WorkerLoop()
 
 void RIOService::ProcessResult(const RIORESULT& result)
 {
-    RioContext* pContext = reinterpret_cast<RioContext*>(result.RequestContext);
+    Core::RioContext* pContext = reinterpret_cast<Core::RioContext*>(result.RequestContext);
     if (pContext == nullptr || pContext->pSession == nullptr) return;
 
     LibNetworks::Sessions::RIOSession* pSession = reinterpret_cast<LibNetworks::Sessions::RIOSession*>(pContext->pSession);
@@ -111,4 +111,4 @@ void RIOService::ProcessResult(const RIORESULT& result)
     pSession->OnRioIOCompleted(bSuccess, result.BytesTransferred, pContext->OpType);
 }
 
-} // namespace LibNetworks::Core
+} // namespace LibNetworks::Services

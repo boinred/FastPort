@@ -1,10 +1,10 @@
-module;
+﻿module;
 
 #include <cstdint>
 
-export module networks.core.inetwork_service;
+export module networks.services.inetwork_service;
 
-namespace LibNetworks::Core
+namespace LibNetworks::Services
 {
 
 /**
@@ -22,4 +22,4 @@ public:
     virtual void Stop() = 0;
 };
 
-} // namespace LibNetworks::Core
+} // namespace LibNetworks::Services

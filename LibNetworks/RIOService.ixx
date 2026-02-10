@@ -6,12 +6,12 @@ module;
 #include <thread>
 #include <atomic>
 
-export module networks.core.rio_service;
+export module networks.services.rio_service;
 
 import networks.core.rio_extension;
-import networks.core.inetwork_service;
+import networks.services.inetwork_service;
 
-namespace LibNetworks::Core
+namespace LibNetworks::Services
 {
 
 /**
