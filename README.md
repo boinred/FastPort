@@ -1,37 +1,39 @@
-﻿# FastPort
+# FastPort
 
-**고성능 Windows IOCP 기반 비동기 네트워크 프레임워크**
+[English](./README.md) | [한국어](./README.ko.md)
 
-C++20 모듈을 활용하여 구현한 확장 가능한 네트워크 서버/클라이언트 라이브러리입니다.
+**High-Performance Asynchronous Network Framework based on Windows IOCP**
 
----
-
-## 🎯 프로젝트 개요
-
-| 항목 | 내용 |
-|------|------|
-| **목적** | IOCP 기반 고성능 비동기 네트워킹 프레임워크 설계 및 구현 |
-| **유형** | 개인 프로젝트 |
-| **개발 환경** | Windows, Visual Studio 2022 (v143+), C++20 |
+A scalable network server/client library implemented using C++20 modules.
 
 ---
 
-## 🛠 기술 스택
+## 🎯 Project Overview
 
-| 분류 | 기술 |
-|------|------|
-| **언어** | C++20 (Modules `.ixx`) |
-| **비동기 I/O** | Windows IOCP (I/O Completion Port) |
-| **네트워크** | Winsock2, AcceptEx, ConnectEx, WSARecv, WSASend |
-| **직렬화** | Protocol Buffers (protobuf), gRPC |
-| **로깅** | spdlog |
-| **동기화** | SRWLock, atomic |
-| **패키지 관리** | vcpkg |
-| **테스트** | Microsoft C++ Unit Test Framework |
+| Item | Description |
+|------|-------------|
+| **Goal** | Design and implementation of a high-performance asynchronous networking framework based on IOCP |
+| **Type** | Personal Project |
+| **Dev Environment** | Windows, Visual Studio 2022 (v143+), C++20 |
 
 ---
 
-## 🏗 아키텍처
+## 🛠 Tech Stack
+
+| Category | Technology |
+|----------|------------|
+| **Language** | C++20 (Modules `.ixx`) |
+| **Async I/O** | Windows IOCP (I/O Completion Port) |
+| **Network** | Winsock2, AcceptEx, ConnectEx, WSARecv, WSASend |
+| **Serialization** | Protocol Buffers (protobuf), gRPC |
+| **Logging** | spdlog |
+| **Synchronization** | SRWLock, atomic |
+| **Package Management** | vcpkg |
+| **Testing** | Microsoft C++ Unit Test Framework |
+
+---
+
+## 🏗 Architecture
 
 ```mermaid
 graph TB
@@ -87,7 +89,7 @@ graph TB
 
 ---
 
-## 📦 패킷 프로토콜
+## 📦 Packet Protocol
 
 ```mermaid
 packet-beta
@@ -96,165 +98,165 @@ packet-beta
     32-95: "Payload (N bytes, Protobuf Serialized)"
 ```
 
-| 필드 | 크기 | 설명 |
-|------|------|------|
-| **Size** | 2 bytes | 전체 패킷 크기 (헤더 포함), Big-Endian |
-| **Packet ID** | 2 bytes | 메시지 타입 식별자, Big-Endian |
-| **Payload** | N bytes | Protocol Buffers 직렬화 데이터 |
+| Field | Size | Description |
+|-------|------|-------------|
+| **Size** | 2 bytes | Total packet size (including header), Big-Endian |
+| **Packet ID** | 2 bytes | Message type identifier, Big-Endian |
+| **Payload** | N bytes | Protocol Buffers serialized data |
 
 ---
 
-## 📁 프로젝트 구조
+## 📁 Project Structure
 
 ```
 FastPort/
-├─ FastPortServer/           # 서버 애플리케이션
+├─ FastPortServer/           # Server Application
 │  ├─ FastPortServer.cpp
 │  ├─ FastPortServiceMode.ixx
 │  └─ FastPortInboundSession.*
 │
-├─ FastPortClient/           # 클라이언트 애플리케이션
+├─ FastPortClient/           # Client Application
 │  ├─ FastPortClient.cpp
 │  └─ FastPortOutboundSession.*
 │
-├─ FastPortBenchmark/        # 성능 벤치마크 도구
+├─ FastPortBenchmark/        # Performance Benchmark Tool
 │  ├─ FastPortBenchmark.cpp
 │  ├─ LatencyBenchmarkRunner.*
 │  ├─ BenchmarkRunner.h
 │  ├─ BenchmarkStats.h
 │  └─ BenchmarkSession.ixx
 │
-├─ LibNetworks/              # 네트워크 코어 라이브러리
-│  ├─ Socket.*               # Winsock 소켓 래퍼
-│  ├─ IOService.*            # IOCP 워커 스레드 관리
-│  ├─ IOConsumer.ixx         # IOCP Completion 인터페이스
-│  ├─ IOSocketListener.*     # AcceptEx 기반 리스너
-│  ├─ IOSocketConnector.*    # ConnectEx 기반 커넥터
-│  ├─ IOSession.*            # 세션 I/O 처리 (Zero-Byte Recv, SG I/O)
-│  ├─ Packet.ixx             # 패킷 구조체
-│  ├─ PacketFramer.ixx       # TCP 스트림 패킷 분리
-│  ├─ InboundSession.*       # 서버 세션 베이스
-│  └─ OutboundSession.*      # 클라이언트 세션 베이스
+├─ LibNetworks/              # Core Network Library
+│  ├─ Socket.*               # Winsock socket wrapper
+│  ├─ IOService.*            # IOCP worker thread management
+│  ├─ IOConsumer.ixx         # IOCP completion interface
+│  ├─ IOSocketListener.*     # AcceptEx-based listener
+│  ├─ IOSocketConnector.*    # ConnectEx-based connector
+│  ├─ IOSession.*            # Session I/O handling (Zero-Byte Recv, SG I/O)
+│  ├─ Packet.ixx             # Packet structure
+│  ├─ PacketFramer.ixx       # TCP stream packet framing
+│  ├─ InboundSession.*       # Server session base
+│  └─ OutboundSession.*      # Client session base
 │
-├─ LibCommons/               # 공용 유틸리티 라이브러리
-│  ├─ Logger.*               # spdlog 래핑
-│  ├─ RWLock.*               # SRWLock 기반 동기화
-│  ├─ ThreadPool.ixx         # 스레드 풀
-│  ├─ EventListener.ixx      # 이벤트 리스너 (작업 큐)
-│  ├─ IBuffer.ixx            # 버퍼 인터페이스
-│  ├─ CircleBufferQueue.ixx  # 원형 버퍼 구현체
-│  ├─ Container.ixx          # 타입 안전 컨테이너 유틸리티
-│  ├─ SingleTon.ixx          # 싱글톤 템플릿
-│  ├─ StrConverter.ixx       # 문자열 변환 유틸리티
-│  └─ ServiceMode.ixx        # 서비스 실행 모드 정의
+├─ LibCommons/               # Common Utility Library
+│  ├─ Logger.*               # spdlog wrapper
+│  ├─ RWLock.*               # SRWLock-based synchronization
+│  ├─ ThreadPool.ixx         # Thread pool
+│  ├─ EventListener.ixx      # Event listener (task queue)
+│  ├─ IBuffer.ixx            # Buffer interface
+│  ├─ CircleBufferQueue.ixx  # Circular buffer implementation
+│  ├─ Container.ixx          # Type-safe container utilities
+│  ├─ SingleTon.ixx          # Singleton template
+│  ├─ StrConverter.ixx       # String conversion utilities
+│  └─ ServiceMode.ixx        # Service execution mode definitions
 │
-├─ Protocols/                # Protocol Buffers 생성 파일
+├─ Protocols/                # Generated Protocol Buffers files
 │  └─ *.pb.h, *.pb.cc
 │
-├─ Protos/                   # .proto 정의 파일
+├─ Protos/                   # .proto definition files
 │  ├─ Commons.proto
 │  ├─ Tests.proto
 │  └─ Benchmark.proto
 │
-├─ docs/                     # 프로젝트 상세 문서
+├─ docs/                     # Detailed project documentation
 │
-└─ LibCommonsTests/          # 단위 테스트
+└─ LibCommonsTests/          # Unit Tests
 └─ LibNetworksTests/
 ```
 
 ---
 
-## ✨ 핵심 구현 내용
+## ✨ Key Implementations
 
-### 1. IOCP 기반 비동기 I/O 처리
+### 1. IOCP-based Asynchronous I/O Handling
 
-- `IOService`: IOCP 핸들 생성 및 하드웨어 동시성 기반 워커 스레드 풀 관리
-- `IIOConsumer`: I/O 완료 통지를 처리하는 인터페이스 기반 설계로 확장성 확보
-- `OVERLAPPED` 확장 구조체를 멤버 변수로 관리하여 런타임 힙 할당 최소화
+- `IOService`: Manages IOCP handles and worker thread pools based on hardware concurrency.
+- `IIOConsumer`: Ensures scalability with an interface-based design for handling I/O completion notifications.
+- Minimized runtime heap allocation by managing extended `OVERLAPPED` structures as member variables.
 
-### 2. 비동기 Accept/Connect (AcceptEx / ConnectEx)
+### 2. Async Accept/Connect (AcceptEx / ConnectEx)
 
-- **Pre-posted Accept**: 서버 시작 시 대량의 `AcceptEx`를 미리 게시하여 연결 수락 지연 최소화
-- **ConnectEx**: 클라이언트 연결 과정까지 완전 비동기로 처리하여 메인 스레드 블로킹 방지
+- **Pre-posted Accept**: Minimizes connection latency by posting a large number of `AcceptEx` requests at server startup.
+- **ConnectEx**: Implements fully asynchronous client connections to prevent main thread blocking.
 
-### 3. 세션 관리 및 전송 보장
+### 3. Session Management and Transmission Guarantees
 
-- **1-Outstanding Send**: `atomic` 플래그를 사용하여 세션당 하나의 송신 요청만 활성화, 순차 전송 보장 및 커널 리소스 절약
-- **Delayed Consume**: 실제 I/O 완료가 확인된 시점에 송신 버퍼 데이터를 소비(Consume)하여 안정성 확보
+- **1-Outstanding Send**: Uses an `atomic` flag to ensure only one send request is active per session, guaranteeing sequential transmission and saving kernel resources.
+- **Delayed Consume**: Ensures stability by consuming send buffer data only after actual I/O completion is confirmed.
 
-### 4. 고성능 수신 최적화 (Zero-Byte Recv)
+### 4. High-Performance Receive Optimization (Zero-Byte Recv)
 
-- **Zero-Byte Recv**: 데이터가 없는 유휴 세션에 대해 0바이트 수신 요청을 걸어두어 커널의 페이지 잠금(Page Locking) 리소스 낭비 방지
-- 알림 수신 시에만 실제 버퍼를 할당/연결하여 대규모 동시 접속 환경에서 메모리 효율 극대화
+- **Zero-Byte Recv**: Prevents kernel page locking resource waste for idle sessions by posting 0-byte receive requests.
+- Maximizes memory efficiency in large-scale concurrent environments by allocating/connecting actual buffers only when a data notification is received.
 
 ### 5. Scatter-Gather I/O (WSABUF)
 
-- **Zero-Copy 송수신**: 링 버퍼의 데이터가 물리적으로 쪼개져 있는 경우에도 임시 복사본을 만들지 않고 `WSABUF` 배열을 통해 커널에 직접 전달
+- **Zero-Copy Transmission**: Directly passes data to the kernel via `WSABUF` arrays without intermediate copies, even when ring buffer data is physically fragmented.
 
-### 6. 계층 분리 설계
+### 6. Layered Architecture
 
-| 계층 | 역할 | 주요 클래스 |
-|------|------|------------|
-| Application | 비즈니스 로직 및 서비스 구동 | `FastPortServer`, `FastPortClient`, `FastPortBenchmark` |
-| Session | 세션 상태 및 도메인 로직 관리 | `InboundSession`, `OutboundSession` |
-| Network Core | Winsock 추상화 및 I/O 수행 | `IOSession`, `PacketFramer`, `Socket` |
-| IOCP Service | 시스템 레벨 I/O 관리 | `IOService`, `IIOConsumer` |
-| Common | 기반 기술 및 유틸리티 | `IBuffer`, `Logger`, `ThreadPool`, `EventListener` |
+| Layer | Role | Key Classes |
+|-------|------|-------------|
+| Application | Business logic and service execution | `FastPortServer`, `FastPortClient`, `FastPortBenchmark` |
+| Session | Session state and domain logic management | `InboundSession`, `OutboundSession` |
+| Network Core | Winsock abstraction and I/O execution | `IOSession`, `PacketFramer`, `Socket` |
+| IOCP Service | System-level I/O management | `IOService`, `IIOConsumer` |
+| Common | Foundational tech and utilities | `IBuffer`, `Logger`, `ThreadPool`, `EventListener` |
 
 ---
 
-## 🔧 빌드 및 실행
+## 🔧 Build and Run
 
-### 요구 사항
+### Requirements
 
-- Windows 10 이상
-- Visual Studio 2022 이상
-- vcpkg (패키지 관리)
+- Windows 10 or higher
+- Visual Studio 2022 or higher
+- vcpkg (Package Manager)
 
-### 의존성 설치
+### Install Dependencies
 
 ```bash
 vcpkg install spdlog protobuf grpc cxxopts
 ```
 
-### 빌드
+### Build
 
-1. `FastPort.slnx` 솔루션 파일 열기 (Visual Studio 2022 17.10+ 권장)
-2. `x64` 플랫폼 및 `Release` 구성을 권장
-3. 전체 빌드 수행 (Ctrl+Shift+B)
-
----
-
-## 📊 벤치마크 및 결과
-
-성능 최적화 단계별 벤치마크 결과는 `docs/` 내 문서에서 확인할 수 있습니다.
-
-- [01. Baseline 측정](docs/benchmark-results-01-baseline.md)
-- [02. Scatter-Gather 적용 결과](docs/benchmark-results-02-scatter-gather.md)
-- [03. Zero-Copy Send 적용 결과](docs/benchmark-results-03-zero-copy-send.md)
+1. Open `FastPort.slnx` solution (Visual Studio 2022 17.10+ recommended).
+2. Recommend `x64` platform and `Release` configuration.
+3. Perform a full build (Ctrl+Shift+B).
 
 ---
 
-## 📚 상세 문서
+## 📊 Benchmarks and Results
 
-| 문서 | 설명 |
-|------|------|
-| [프로젝트 구조](docs/PROJECT_STRUCTURE.md) | 상세 디렉터리 및 파일 역할 정의 |
-| [IOCP 아키텍처](docs/ARCHITECTURE_IOCP.md) | 상세 설계 및 I/O 흐름도 |
-| [패킷 프로토콜](docs/PACKET_PROTOCOL.md) | 헤더 구조 및 직렬화 방식 명세 |
-| [모듈 의존성](docs/MODULE_DEPENDENCIES.md) | C++20 모듈 간 참조 관계 |
-| [빌드 가이드](docs/BUILD_GUIDE.md) | 환경 설정 및 트러블슈팅 |
-| [벤치마크 가이드](docs/BENCHMARK_GUIDE.md) | 성능 측정 도구 사용법 |
-| [C++ 현대적 기능 활용](docs/CPP_MODERN_FEATURES.md) | 사용된 C++20/23 기능 설명 |
+Step-by-step performance optimization benchmark results can be found in the `docs/` directory.
+
+- [01. Baseline Measurement](docs/benchmark-results-01-baseline.md)
+- [02. Scatter-Gather Results](docs/benchmark-results-02-scatter-gather.md)
+- [03. Zero-Copy Send Results](docs/benchmark-results-03-zero-copy-send.md)
 
 ---
 
-## 🚀 향후 개선 계획
+## 📚 Detailed Documentation
 
-- [ ] **RIO (Registered I/O) 지원**: Windows 최신 고성능 I/O API 적용 ([ARCHITECTURE_RIO.md](docs/ARCHITECTURE_RIO.md))
-- [ ] **세션 매니저 고도화**: 멀티 코어 대응 세션 맵 분할 및 브로드캐스트 최적화
-- [ ] **메모리 풀 (Object Pool)**: 세션 및 패킷 객체 재사용을 통한 GC 부하 감소
-- [ ] **TLS/SSL 지원**: 보안 전송 레이어 통합
+| Document | Description |
+|----------|-------------|
+| [Project Structure](docs/PROJECT_STRUCTURE.md) | Detailed directory and file role definitions |
+| [IOCP Architecture](docs/ARCHITECTURE_IOCP.md) | Detailed design and I/O flowcharts |
+| [Packet Protocol](docs/PACKET_PROTOCOL.md) | Header structure and serialization specifications |
+| [Module Dependencies](docs/MODULE_DEPENDENCIES.md) | Reference relationships between C++20 modules |
+| [Build Guide](docs/BUILD_GUIDE.md) | Environment setup and troubleshooting |
+| [Benchmark Guide](docs/BENCHMARK_GUIDE.md) | Performance measurement tool usage |
+| [Modern C++ Features](docs/CPP_MODERN_FEATURES.md) | Explanation of C++20/23 features used |
+
+---
+
+## 🚀 Future Roadmap
+
+- [ ] **RIO (Registered I/O) Support**: Apply latest high-performance Windows I/O API ([ARCHITECTURE_RIO.md](docs/ARCHITECTURE_RIO.md))
+- [ ] **Advanced Session Manager**: Optimized session map partitioning and broadcasting for multi-core systems.
+- [ ] **Object Pooling**: Reduce GC overhead by reusing session and packet objects.
+- [ ] **TLS/SSL Support**: Integration of secure transmission layer.
 
 ---
 
