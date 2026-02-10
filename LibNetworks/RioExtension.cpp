@@ -9,11 +9,6 @@ module;
 #include <guiddef.h>
 #include <spdlog/spdlog.h>
 
-// WSAID_MULTIPLE_RIO_QUERY_EXTENSION_FUNCTIONS GUID 직접 정의 (0x8509e081, 0x96dd, 0x4005, 0xb1, 0xe3, 0xd2, 0xdd, 0x90, 0x71, 0x7f, 0x67)
-#ifndef WSAID_MULTIPLE_RIO_QUERY_EXTENSION_FUNCTIONS
-#define WSAID_MULTIPLE_RIO_QUERY_EXTENSION_FUNCTIONS {0x8509e081, 0x96dd, 0x4005, {0xb1, 0xe3, 0xd2, 0xdd, 0x90, 0x71, 0x7f, 0x67}}
-#endif
-
 module networks.core.rio_extension;
 
 
@@ -39,7 +34,8 @@ bool RioExtension::Initialize(SOCKET socket)
         return false;
     }
 
-    GUID rioGuid = WSAID_MULTIPLE_RIO_QUERY_EXTENSION_FUNCTIONS;
+
+    GUID rioGuid = WSAID_MULTIPLE_RIO;
     DWORD dwBytes = 0;
 
     int result = ::WSAIoctl(

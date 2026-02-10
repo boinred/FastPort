@@ -71,7 +71,7 @@ bool Socket::CreateSocket(const ENetworkMode& networkMode)
         flags = WSA_FLAG_OVERLAPPED;
         break;
     case ENetworkMode::RIO:
-        flags = WSA_FLAG_REGISTERED_IO;
+        flags = WSA_FLAG_REGISTERED_IO | WSA_FLAG_OVERLAPPED;
         break;
     default:
         LibCommons::Logger::GetInstance().LogError("Socket", "Socket Create failed. Invalid Network Mode : {}", static_cast<int>(networkMode));
