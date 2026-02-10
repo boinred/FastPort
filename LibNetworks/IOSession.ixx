@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <WinSock2.h>
 #include <memory>
@@ -107,10 +107,6 @@ protected:
     void RequestDisconnect();
 
 private:
-    // 수신 데이터 누적 버퍼(큐).
-    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer{};
-    // 송신 데이터 누적 버퍼(큐).
-    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pSendBuffer{};
 
     // 수신용 OVERLAPPED 컨텍스트
     OverlappedEx m_RecvOverlapped{};

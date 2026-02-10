@@ -7,6 +7,8 @@
 
 export module networks.sessions.inetwork_session;
 
+import commons.buffers.ibuffer;
+
 namespace LibNetworks::Sessions
 {
 
@@ -33,6 +35,12 @@ public:
 
     // (Outbound 전용) ConnectEx용 OVERLAPPED 포인터 반환
     virtual OVERLAPPED* GetConnectOverlappedPtr() { return nullptr; }
+
+protected:
+    // 수신 데이터 누적 버퍼(큐).
+    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pReceiveBuffer{};
+    // 송신 데이터 누적 버퍼(큐).
+    std::unique_ptr<LibCommons::Buffers::IBuffer> m_pSendBuffer{};
 };
 
 } // namespace LibNetworks::Sessions

@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <WinSock2.h>
 #include <MSWSock.h>
@@ -23,17 +23,14 @@ namespace LibNetworks::Sessions
 {
 
 /**
- * RIO (Registered I/O) 기반 네트워크 세션
+ * RIO (Registered I/O) 기반 네트워크 세션 (Client에서는 사용하지 않고 Server 전용)
  * C1001 에러 방지를 위해 상속 구조 단순화
  */
 export class RIOSession : public INetworkSession, public std::enable_shared_from_this<RIOSession>
 {
 public:
-    RIOSession(const std::shared_ptr<Core::Socket>& pSocket,
-               const Core::RioBufferSlice& recvSlice,
-               const Core::RioBufferSlice& sendSlice,
-               RIO_CQ completionQueue);
-    
+    RIOSession(const std::shared_ptr<Core::Socket>& pSocket, const Core::RioBufferSlice& recvSlice, const Core::RioBufferSlice& sendSlice, RIO_CQ completionQueue);
+
     virtual ~RIOSession() override;
 
     bool Initialize();
@@ -60,15 +57,12 @@ private:
 private:
     std::shared_ptr<Core::Socket> m_pSocket;
     RIO_RQ m_RQ = RIO_INVALID_RQ;
-    
-    Core::RioBufferSlice m_RecvSlice;
-    Core::RioBufferSlice m_SendSlice;
-    
-    Core::RioContext m_RecvContext;
-    Core::RioContext m_SendContext;
-    
-    std::unique_ptr<LibCommons::Buffers::ExternalCircleBufferQueue> m_pReceiveBuffer;
-    std::unique_ptr<LibCommons::Buffers::ExternalCircleBufferQueue> m_pSendBuffer;
+
+    Core::RioBufferSlice m_RecvSlice{};
+    Core::RioBufferSlice m_SendSlice{};
+
+    Core::RioContext m_RecvContext{};
+    Core::RioContext m_SendContext{};
 
     std::atomic<bool> m_bSendInProgress = false;
     std::atomic<bool> m_bIsDisconnected = false;

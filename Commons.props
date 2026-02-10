@@ -18,6 +18,7 @@
       <PrecompiledHeaderOutputFile />
       <EnableModules>false</EnableModules>
       <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
+      <DisableSpecificWarnings>4251;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <PreBuildEvent>
       <Command>

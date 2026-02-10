@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <windows.h>
 #include <winnt.h>
@@ -62,6 +62,7 @@ void FastPortServiceMode::OnStarted()
 
 void FastPortServiceMode::StartIocpMode()
 {
+
     auto pOnFuncCreateSession = [](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::INetworkSession>
         {
             auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);  // 8KB
@@ -104,7 +105,6 @@ void FastPortServiceMode::StartRioMode()
     if (!m_RioBufferManager->Initialize(1024 * 1024 * 64)) // 64MB
     {
         // 세션 1개당 16KB (수신 8KB + 송신 8KB) 사용 시 약 4096개 동시 세션 지원
-
         logger.LogError("FastPortServiceMode", "Failed to initialize RIO buffer manager.");
         return; // 64MB pool
     }
@@ -116,8 +116,7 @@ void FastPortServiceMode::StartRioMode()
             m_RioBufferManager->AllocateSlice(C_RIO_RECV_BUFFER_SIZE, recvSlice);
             m_RioBufferManager->AllocateSlice(C_RIO_SEND_BUFFER_SIZE, sendSlice);
 
-            auto pSession = std::make_shared<LibNetworks::Sessions::RIOSession>(
-                pSocket, recvSlice, sendSlice, m_RioService->GetCompletionQueue());
+            auto pSession = std::make_shared<LibNetworks::Sessions::RIOSession>(pSocket, recvSlice, sendSlice, m_RioService->GetCompletionQueue());
 
             pSession->Initialize();
             return pSession;
@@ -135,7 +134,11 @@ void FastPortServiceMode::StartRioMode()
 void FastPortServiceMode::OnStopped()
 {
     LibCommons::Logger::GetInstance().LogInfo("FastPortServiceMode", "OnStopped. Service : {}", GetDisplayNameAnsi());
-    if (m_RioService) m_RioService->Stop();
+    if (m_RioService)
+    {
+        m_RioService->Stop();
+        m_RioService.reset();
+    }
 }
 
 void FastPortServiceMode::OnShutdown()

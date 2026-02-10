@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <WinSock2.h>
 #include <spdlog/spdlog.h>
@@ -21,10 +21,11 @@ namespace LibNetworks::Sessions
 IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer)
-    : m_pReceiveBuffer(std::move(pReceiveBuffer)),
-    m_pSendBuffer(std::move(pSendBuffer)),
-    m_pSocket(std::move(pSocket))
+    : m_pSocket(std::move(pSocket))
 {
+    m_pReceiveBuffer = std::move(pReceiveBuffer);
+    m_pSendBuffer = std::move(pSendBuffer);
+
     // Recv는 고정 크기 버퍼를 재사용.
     m_RecvOverlapped.Buffers.resize(16 * 1024);
 }
@@ -80,10 +81,6 @@ void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Mes
     const size_t bodySize = rfMessage.ByteSizeLong();
     const size_t totalSize = Core::Packet::GetHeaderSize() + Core::Packet::GetPacketIdSize() + bodySize;
 
-    if (!m_pSendBuffer)
-    {
-        return;
-    }
 
     std::vector<std::span<std::byte>> buffers;
     // 링버퍼에 직접 공간 예약 (실패 시 전송 불가)

@@ -1,14 +1,4 @@
-// 모듈 import를 최상단으로 이동하여 표준 라이브러리 충돌 방지
-import benchmark.session;
-import networks.services.io_service;
-import networks.core.io_socket_connector;
-import networks.core.socket;
-import networks.core.packet;
-import commons.buffers.circle_buffer_queue;
-import commons.logger;
-
-#include <iostream>
-#include <string>
+﻿#include <iostream>
 #include <memory>
 #include <thread>
 #include <chrono>
@@ -23,6 +13,14 @@ import commons.logger;
 #include "BenchmarkRunner.h"
 #include "LatencyBenchmarkRunner.h"
 #include "Protocols/Benchmark.pb.h"
+
+import benchmark.session;
+import networks.services.io_service;
+import networks.core.io_socket_connector;
+import networks.core.socket;
+import networks.core.packet;
+import commons.buffers.circle_buffer_queue;
+import commons.logger;
 
 namespace FastPortBenchmark
 {

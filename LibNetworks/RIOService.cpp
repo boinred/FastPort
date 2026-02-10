@@ -3,6 +3,7 @@
 #include <WinSock2.h>
 #include <MSWSock.h>
 #include <thread>
+#include <spdlog/spdlog.h>
 
 module networks.services.rio_service;
 
@@ -95,7 +96,7 @@ void RIOService::WorkerLoop()
 
         for (ULONG i = 0; i < count; ++i)
         {
-            ProcessResult(results[i]);
+            RIOService::ProcessResult(results[i]);
         }
     }
 }
@@ -103,7 +104,11 @@ void RIOService::WorkerLoop()
 void RIOService::ProcessResult(const RIORESULT& result)
 {
     Core::RioContext* pContext = reinterpret_cast<Core::RioContext*>(result.RequestContext);
-    if (pContext == nullptr || pContext->pSession == nullptr) return;
+    if (pContext == nullptr || pContext->pSession == nullptr)
+    {
+        LibCommons::Logger::GetInstance().LogError("RIOService", "Request Context is not valid.");
+        return;
+    }
 
     LibNetworks::Sessions::RIOSession* pSession = reinterpret_cast<LibNetworks::Sessions::RIOSession*>(pContext->pSession);
 

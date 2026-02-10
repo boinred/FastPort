@@ -133,13 +133,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FastPortBenchmark.cpp" />
-    <!-- MSVC Module + Protobuf Conflict - Excluded from build for now -->
-    <ClCompile Include="LatencyBenchmarkRunner.cpp">
-      <ExcludedFromBuild>true</ExcludedFromBuild>
-    </ClCompile>
-    <ClCompile Include="BenchmarkSession.ixx">
-      <ExcludedFromBuild>true</ExcludedFromBuild>
-    </ClCompile>
+    <ClCompile Include="LatencyBenchmarkRunner.cpp" />
+    <ClCompile Include="BenchmarkSession.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BenchmarkStats.h" />
@@ -161,3 +156,5 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+
+

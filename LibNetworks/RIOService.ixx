@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <WinSock2.h>
 #include <MSWSock.h>
@@ -39,7 +39,7 @@ private:
     void WorkerLoop();
 
     // 개별 작업 결과 처리
-    void ProcessResult(const RIORESULT& result);
+    static void ProcessResult(const RIORESULT& result);
 
 private:
     RIO_CQ m_CQ = RIO_INVALID_CQ;
