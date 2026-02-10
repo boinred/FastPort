@@ -1,192 +1,70 @@
 ﻿module;
 
 #include <windows.h>
-#include <winnt.h>
-#include <spdlog/spdlog.h>
-
-#include <cxxopts.hpp>
-
+#include <stdint.h>
 export module fastport_service_mode;
 
 import std; 
-
 import commons.service_mode;
-import commons.logger; 
-import commons.buffers.circle_buffer_queue;
-import commons.buffers.external_circle_buffer_queue;
-
 import networks.core.socket; 
 import networks.core.io_socket_acceptor;
 import networks.services.rio_service;
 import networks.core.rio_buffer_manager;
-import networks.core.rio_extension;
-import networks.sessions.inbound_session;
-import networks.sessions.rio_session;
-import networks.sessions.inetwork_session;
-
-import fastport_inbound_session;
-
-
 
 export class FastPortServiceMode : public LibCommons::ServiceMode
 {
 public:
     FastPortServiceMode() : ServiceMode(true, true, false) {}
 
-    bool ParseArgs(int argc, const char* argv[])
-    {
-        try {
-            cxxopts::Options options("FastPortServer", "High-performance network server");
-            options.add_options()
-                ("r,rio", "Use RIO (Registered I/O) mode", cxxopts::value<bool>()->default_value("false"))
-                ("h,help", "Print usage");
-
-            auto result = options.parse(argc, argv);
-
-            if (result.count("help")) {
-                std::cout << options.help() << std::endl;
-                return false;
-            }
-
-            if (result["rio"].as<bool>()) {
-                m_NetworkMode = LibNetworks::Core::Socket::ENetworkMode::RIO;
-            }
-        }
-        catch (const cxxopts::exceptions::exception& e) {
-            std::cerr << "Error parsing options: " << e.what() << std::endl;
-            return false;
-        }
-        return true;
-    }
+    // 명령줄 인수를 파싱하여 서비스 모드(IOCP/RIO) 설정
+    bool ParseArgs(int argc, const char* argv[]);
 
 protected:
-    // ServiceMode을(를) 통해 상속됨
-    void OnStarted() override
-    {
-        LibCommons::Logger::GetInstance().LogInfo("FastPortServiceMode", "OnStarted. Service : {}, Mode : {}",
-            GetDisplayNameAnsi(), (m_NetworkMode == LibNetworks::Core::Socket::ENetworkMode::RIO ? "RIO" : "IOCP"));
+    // 서비스 시작 시 호출되어 선택된 네트워크 모드로 서버 구동
+    void OnStarted() override;
 
-        if (m_NetworkMode == LibNetworks::Core::Socket::ENetworkMode::RIO)
-        {
-            StartRioMode();
-        }
-        else
-        {
-            StartIocpMode();
-        }
-    }
+    // 서비스 중지 시 호출되어 RIO 서비스 중단
+    void OnStopped() override;
 
-private:
-    void StartIocpMode()
-    {
-        auto pOnFuncCreateSession = [](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::INetworkSession>
-            {
-                auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);  // 8KB
-                auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);  // 8KB  
-                auto pSession = std::make_shared<FastPortInboundSession>(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer));
+    // 서비스 종료 시 호출되어 리소스를 정리하고 소켓 닫기
+    void OnShutdown() override;
 
-                return pSession;
-            };
-
-        m_Acceptor = LibNetworks::Core::IOSocketAcceptor::Create(m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
-        m_bRunning = nullptr != m_Acceptor;
-    }
-
-    void StartRioMode()
-    {
-        auto& logger = LibCommons::Logger::GetInstance();
-
-        // 1. RIO 확장 로드 (더미 소켓 사용)
-        LibNetworks::Core::Socket dummy;
-        dummy.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO);
-
-        if (!LibNetworks::Core::RioExtension::Initialize(dummy.GetSocket()))
-        {
-            logger.LogError("FastPortServiceMode", "Failed to initialize RIO extension.");
-            return;
-        }
-        dummy.Close();
-
-        // 2. RIO 서비스 및 버퍼 매니저 초기화
-        m_RioService = std::make_shared<LibNetworks::Services::RIOService>();
-        if (!m_RioService->Initialize(1024))
-        {
-            logger.LogError("FastPortServiceMode", "Failed to initialize RIO service.");
-            return;
-        }
-
-        m_RioBufferManager = std::make_shared<LibNetworks::Core::RioBufferManager>();
-
-        // TIPS: 실제 서버에서는 여유분을 고려해 보통 512MB ~ 1GB 정도를 할당하여 운영합니다.
-        if (!m_RioBufferManager->Initialize(1024 * 1024 * 64)) // 64MB
-        {
-            // 세션 1개당 16KB (수신 8KB + 송신 8KB) 사용 시 약 4096개 동시 세션 지원
-
-            logger.LogError("FastPortServiceMode", "Failed to initialize RIO buffer manager.");
-            return; // 64MB pool
-        }
-
-        // 3. 세션 생성 콜백
-        auto pOnFuncCreateSession = [this](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::INetworkSession>
-            {
-                LibNetworks::Core::RioBufferSlice recvSlice, sendSlice;
-                m_RioBufferManager->AllocateSlice(C_RIO_RECV_BUFFER_SIZE, recvSlice);
-                m_RioBufferManager->AllocateSlice(C_RIO_SEND_BUFFER_SIZE, sendSlice);
-
-                auto pSession = std::make_shared<LibNetworks::Sessions::RIOSession>(
-                    pSocket, recvSlice, sendSlice, m_RioService->GetCompletionQueue());
-
-                pSession->Initialize();
-                return pSession;
-            };
-
-        // 4. Acceptor 생성 (Accept 과정은 IOCP IOService 사용, 세션은 RIO 사용)
-        m_Acceptor = LibNetworks::Core::IOSocketAcceptor::Create(m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
-
-        // RIO 서비스 시작
-        m_RioService->Start(std::thread::hardware_concurrency());
-
-        m_bRunning = nullptr != m_Acceptor;
-    }
-
-protected:
-    void OnStopped() override
-    {
-        LibCommons::Logger::GetInstance().LogInfo("FastPortServiceMode", "OnStopped. Service : {}", GetDisplayNameAnsi());
-        if (m_RioService) m_RioService->Stop();
-    }
-
-    void OnShutdown() override
-    {
-        LibCommons::Logger::GetInstance().LogInfo("FastPortServiceMode", "OnShutdown. Service : {}", GetDisplayNameAnsi());
-
-        if (m_Acceptor)
-        {
-            m_Acceptor->Shutdown();
-            m_Acceptor.reset();
-        }
-    }
-
+    // 서비스 이름 반환
     std::wstring GetServiceName() const override { return L"FastPortServer"; }
 
+    // 서비스 표시 이름 반환
     std::wstring GetDisplayName() override { return L"FastPortServer Service"; }
 
+    // 서비스 시작 유형 반환
     const DWORD GetStartType() const override { return SERVICE_DEMAND_START; }
 
 private:
+    // IOCP 모드로 서버 시작
+    void StartIocpMode();
 
+    // RIO 모드로 서버 시작
+    void StartRioMode();
+
+private:
+    // 서버 리스닝 포트
     const unsigned short C_LISTEN_PORT = 6628;
-    const uint32_t C_RIO_RECV_BUFFER_SIZE = 16 * 1024; // 16KB
-    const uint32_t C_RIO_SEND_BUFFER_SIZE = 16 * 1024; // 16KB
+    // RIO 수신 버퍼 크기 (16KB)
+    const uint32_t C_RIO_RECV_BUFFER_SIZE = 16 * 1024;
+    // RIO 송신 버퍼 크기 (16KB)
+    const uint32_t C_RIO_SEND_BUFFER_SIZE = 16 * 1024;
 
+    // 네트워크 모드 (기본값 IOCP)
     LibNetworks::Core::Socket::ENetworkMode m_NetworkMode = LibNetworks::Core::Socket::ENetworkMode::IOCP;
 
+    // 리스닝 소켓
     LibNetworks::Core::Socket m_ListenSocket{};
 
+    // IOCP 소켓 수락 처리기
     std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> m_Acceptor{};
 
+    // RIO 서비스 관리자
     std::shared_ptr<LibNetworks::Services::RIOService> m_RioService{};
 
+    // RIO 버퍼 관리자
     std::shared_ptr<LibNetworks::Core::RioBufferManager> m_RioBufferManager{};
-
 };

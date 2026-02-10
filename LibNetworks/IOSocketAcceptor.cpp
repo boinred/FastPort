@@ -18,13 +18,13 @@ namespace LibNetworks::Core
 
 std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> IOSocketAcceptor::Create(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession, const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount /*= 100*/)
 {
-    auto pListener = std::make_shared<IOSocketAcceptor>(rfListenerSocket, pOnDoFuncCreateSession);
-    if (!pListener->Start(listenPort, maxConnectionCount, threadCount, beginAcceptCount))
+    auto pAcceptor = std::make_shared<IOSocketAcceptor>(rfListenerSocket, pOnDoFuncCreateSession);
+    if (!pAcceptor->Start(listenPort, maxConnectionCount, threadCount, beginAcceptCount))
     {
         LibCommons::Logger::GetInstance().LogError("IOSocketAcceptor", "Create - Start failed. Port : {}", listenPort);
         return nullptr;
     }
-    return pListener;
+    return pAcceptor;
 
 }
 
