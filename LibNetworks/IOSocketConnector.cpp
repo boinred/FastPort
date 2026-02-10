@@ -70,7 +70,7 @@ bool IOSocketConnector::Connect(std::string ip, const unsigned short port)
     auto& logger = LibCommons::Logger::GetInstance();
 
     // 1. 소켓 생성
-    m_pSocket->CreateSocket();
+    m_pSocket->CreateSocket(LibNetworks::Core::Socket::ENetworkMode::IOCP);
 
     // 2. 주소 설정
     m_pSocket->SetLocalAddress(0);

@@ -12,12 +12,20 @@ namespace LibNetworks::Core
 {
 
 
+
 export class Socket
 {
 public:
+    enum class ENetworkMode
+    {
+        IOCP,
+        RIO
+    };
 
     // Winsock 라이브러리 초기화
     static void Initialize();
+    static void WSACleanup();
+
     // IP 문자열과 포트 번호로 sockaddr_in 구조체 생성
     static bool CreateSocketAddress(sockaddr_in& rfSockAddr, const std::string ip, const unsigned short port);
 public:
@@ -40,7 +48,7 @@ public:
     explicit operator bool() const;
 
     // TCP 소켓 생성
-    void CreateSocket();
+    bool CreateSocket(const ENetworkMode& networkMode);
 
     // 소켓 송수신 종료
     void Shutdown(int how = SD_BOTH);

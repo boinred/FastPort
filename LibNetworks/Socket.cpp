@@ -30,6 +30,11 @@ void Socket::Initialize()
     }
 }
 
+void Socket::WSACleanup()
+{
+    ::WSACleanup();
+}
+
 
 bool Socket::CreateSocketAddress(sockaddr_in& rfSockAddr, const std::string ip, const unsigned short port)
 {
@@ -57,19 +62,36 @@ Socket& Socket::operator=(Socket&& rhs) noexcept
 }
 
 
-void Socket::CreateSocket()
+bool Socket::CreateSocket(const ENetworkMode& networkMode)
 {
-    m_Socket = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
+    DWORD flags = 0;
+    switch (networkMode)
+    {
+    case ENetworkMode::IOCP:
+        flags = WSA_FLAG_OVERLAPPED;
+        break;
+    case ENetworkMode::RIO:
+        flags = WSA_FLAG_REGISTERED_IO;
+        break;
+    default:
+        LibCommons::Logger::GetInstance().LogError("Socket", "Socket Create failed. Invalid Network Mode : {}", static_cast<int>(networkMode));
+
+        return false;
+    }
+
+    m_Socket = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, flags);
     if (INVALID_SOCKET == m_Socket)
     {
         LibCommons::Logger::GetInstance().LogError("Socket", "Socket Create failed. Last Error : {}", ::GetLastError());
 
         Close();
 
-        return;
+        return false;
     }
 
-    LibCommons::Logger::GetInstance().LogInfo("Socket", "Socket Created.");
+    LibCommons::Logger::GetInstance().LogInfo("Socket", "Socket Created. Socket Mode : {}", static_cast<int>(networkMode));
+
+    return true; 
 }
 
 void Socket::Shutdown(int how)

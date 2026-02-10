@@ -46,10 +46,13 @@ protected:
 private:
     bool Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount);
 
-    bool ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount);
+    bool ListenSocket(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, const unsigned short listenPort, const unsigned long maxConnectionCount);
     bool BeginAcceptEx();
 
 private:
+
+    LibNetworks::Core::Socket::ENetworkMode m_ListenerSocketMode = LibNetworks::Core::Socket::ENetworkMode::IOCP;
+
     Core::Socket m_ListenerSocket = {};
     std::shared_ptr<Services::INetworkService> m_pService = {};
 

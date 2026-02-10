@@ -1,6 +1,8 @@
-#include "CppUnitTest.h"
+﻿#include "CppUnitTest.h"
 #include <WinSock2.h>
 #include <MSWSock.h>
+
+#pragma comment(lib, "ws2_32.lib")
 
 import networks.core.rio_extension;
 import networks.core.socket;
@@ -17,27 +19,26 @@ namespace LibNetworksTests
             WSADATA wsaData;
             int result = ::WSAStartup(MAKEWORD(2, 2), &wsaData);
             Assert::AreEqual(0, result, L"WSAStartup failed");
+
+            LibNetworks::Core::Socket::Initialize();
         }
 
         TEST_CLASS_CLEANUP(CleanupWinsock)
         {
-            ::WSACleanup();
+            LibNetworks::Core::Socket::WSACleanup();
         }
 
+        // RIO 확장 함수들이 정상적으로 로드되는지 테스트.
         TEST_METHOD(TestRioExtensionLoading)
         {
             // 1. Create a dummy overlapped socket
-            SOCKET sock = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_REGISTERED_IO);
-            if (sock == INVALID_SOCKET)
-            {
-                // Fallback for environments that might not support RIO flags directly in WSASocket
-                sock = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
-            }
+            LibNetworks::Core::Socket dummy; 
+            bool bSuccess = dummy.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO);
             
-            Assert::AreNotEqual(INVALID_SOCKET, sock, L"Failed to create test socket");
+            Assert::IsTrue(bSuccess, L"Failed to create test socket");
 
             // 2. Perform initialization
-            bool result = LibNetworks::Core::RioExtension::Initialize(sock);
+            bool result = LibNetworks::Core::RioExtension::Initialize(dummy.GetSocket());
             
             // 3. Verify success
             Assert::IsTrue(result, L"RioExtension::Initialize failed with valid socket");
@@ -46,28 +47,30 @@ namespace LibNetworksTests
             // 4. Verify function table is loaded (check one key function)
             Assert::IsNotNull((void*)LibNetworks::Core::RioExtension::GetTable().RIOReceive, L"RIOReceive function pointer is null");
 
-            ::closesocket(sock);
+            dummy.Close();
         }
 
+        // Initialize 함수를 여러 번 호출해도 안전한지 테스트.
         TEST_METHOD(TestRioExtensionDoubleInitialization)
         {
             // Note: Tests run sequentially or in isolation depending on runner, 
             // but since RioExtension uses static flags, we check if it remains true.
-            SOCKET sock = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
-            Assert::AreNotEqual(INVALID_SOCKET, sock);
-
+            // 1. Create a dummy overlapped socket
+            LibNetworks::Core::Socket dummy;
+            bool bSuccess = dummy.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO);
             // First call
-            LibNetworks::Core::RioExtension::Initialize(sock);
+            LibNetworks::Core::RioExtension::Initialize(dummy.GetSocket());
             
             // Second call
-            bool result = LibNetworks::Core::RioExtension::Initialize(sock);
+            bool result = LibNetworks::Core::RioExtension::Initialize(dummy.GetSocket());
             
             Assert::IsTrue(result, L"Second initialization should return true");
             Assert::IsTrue(LibNetworks::Core::RioExtension::IsInitialized());
 
-            ::closesocket(sock);
+            dummy.Close();
         }
 
+        // 초기화 중 유효하지 않은 소켓 처리를 테스트.
         TEST_METHOD(TestRioExtensionInvalidSocket)
         {
             // If already initialized by previous tests, we can't easily "un-initialize" 

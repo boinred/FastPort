@@ -147,7 +147,7 @@ bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned lon
     }
 
     // 2. Listener를 위한 Socket 생성.
-    if (!ListenSocket(listenPort, maxConnectionCount))
+    if (!ListenSocket(m_ListenerSocketMode, listenPort, maxConnectionCount))
     {
         logger.LogError("IOSocketAcceptor", "ListenSocket is not valid.");
 
@@ -173,12 +173,25 @@ bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned lon
     return true;
 }
 
-bool IOSocketAcceptor::ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount)
+bool IOSocketAcceptor::ListenSocket(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, const unsigned short listenPort, const unsigned long maxConnectionCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
     // 1. 소켓 생성
-    m_ListenerSocket.CreateSocket();
+    switch(listenSocketMode)
+    {
+    case LibNetworks::Core::Socket::ENetworkMode::IOCP:
+        m_ListenerSocket.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::IOCP);
+        break;
+    case LibNetworks::Core::Socket::ENetworkMode::RIO:
+        m_ListenerSocket.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO);
+        break;
+    default:
+        logger.LogError("IOSocketAcceptor", "ListenSocket: Invalid listen socket mode : {}", static_cast<int>(listenSocketMode));
+        return false;
+    }
+    m_ListenerSocketMode = listenSocketMode;
+    
 
     // 2. 주소 설정 (모든 인터페이스)
     m_ListenerSocket.SetLocalAddress(listenPort);

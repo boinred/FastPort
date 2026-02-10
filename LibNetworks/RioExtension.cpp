@@ -56,7 +56,8 @@ bool RioExtension::Initialize(SOCKET socket)
 
     if (result == SOCKET_ERROR)
     {
-        LibCommons::Logger::GetInstance().LogError("RioExtension", "Initialize: WSAIoctl(SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER) failed. Error: {}", ::WSAGetLastError());
+        int errorCode = ::WSAGetLastError();
+        LibCommons::Logger::GetInstance().LogError("RioExtension", "Initialize: WSAIoctl(SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER) failed. Error: {}", errorCode);
 
         return false;
     }

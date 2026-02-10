@@ -49,7 +49,7 @@ public:
             }
 
             if (result["rio"].as<bool>()) {
-                m_NetworkMode = LibCommons::NetworkMode::RIO;
+                m_NetworkMode = LibNetworks::Core::Socket::ENetworkMode::RIO;
             }
         }
         catch (const cxxopts::exceptions::exception& e) {
@@ -64,9 +64,9 @@ protected:
     void OnStarted() override
     {
         LibCommons::Logger::GetInstance().LogInfo("FastPortServiceMode", "OnStarted. Service : {}, Mode : {}", 
-            GetDisplayNameAnsi(), (m_NetworkMode == LibCommons::NetworkMode::RIO ? "RIO" : "IOCP"));
+            GetDisplayNameAnsi(), (m_NetworkMode == LibNetworks::Core::Socket::ENetworkMode::RIO ? "RIO" : "IOCP"));
 
-        if (m_NetworkMode == LibCommons::NetworkMode::RIO)
+        if (m_NetworkMode == LibNetworks::Core::Socket::ENetworkMode::RIO)
         {
             StartRioMode();
         }
@@ -98,7 +98,8 @@ private:
 
         // 1. RIO 확장 로드 (더미 소켓 사용)
         LibNetworks::Core::Socket dummy;
-        dummy.CreateSocket();
+        dummy.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO);
+
         if (!LibNetworks::Core::RioExtension::Initialize(dummy.GetSocket()))
         {
             logger.LogError("FastPortServiceMode", "Failed to initialize RIO extension.");
@@ -164,7 +165,7 @@ private:
 
     const unsigned short C_LISTEN_PORT = 6628;
 
-    LibCommons::NetworkMode m_NetworkMode = LibCommons::NetworkMode::IOCP;
+    LibNetworks::Core::Socket::ENetworkMode m_NetworkMode = LibNetworks::Core::Socket::ENetworkMode::IOCP;
 
     LibNetworks::Core::Socket m_ListenSocket{};
 
