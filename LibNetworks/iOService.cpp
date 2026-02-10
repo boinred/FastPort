@@ -26,7 +26,7 @@ IOService::~IOService()
     }
 }
 
-bool IOService::Start(unsigned int numThreads)
+bool IOService::Start(uint32_t threadCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
@@ -88,7 +88,7 @@ bool IOService::Start(unsigned int numThreads)
             }
         };
 
-    for (size_t i = 0; i < numThreads; i++)
+    for (size_t i = 0; i < threadCount; i++)
     {
         m_Workers.emplace_back(fDoWorker);
     }

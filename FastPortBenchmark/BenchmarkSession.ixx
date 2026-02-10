@@ -1,16 +1,18 @@
-﻿module;
+module;
 
 #include <memory>
 #include <functional>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
+#include <chrono>
 
 export module benchmark.session;
 
 import networks.sessions.outbound_session;
 import commons.buffers.ibuffer;
 import networks.core.packet;
+import networks.core.socket;
 
 namespace FastPortBenchmark
 {
@@ -51,7 +53,7 @@ public:
 protected:
     void OnConnected() override
     {
-        __super::OnConnected();
+        LibNetworks::Sessions::OutboundSession::OnConnected();
         m_Connected.store(true);
         
         {
@@ -67,7 +69,7 @@ protected:
 
     void OnDisconnected() override
     {
-        __super::OnDisconnected();
+        LibNetworks::Sessions::OutboundSession::OnDisconnected();
         m_Connected.store(false);
 
         if (m_DisconnectHandler)
@@ -78,7 +80,7 @@ protected:
 
     void OnPacketReceived(const LibNetworks::Core::Packet& rfPacket) override
     {
-        __super::OnPacketReceived(rfPacket);
+        LibNetworks::Sessions::OutboundSession::OnPacketReceived(rfPacket);
 
         if (m_PacketHandler)
         {
@@ -88,7 +90,7 @@ protected:
 
     void OnSent(size_t bytesSent) override
     {
-        __super::OnSent(bytesSent);
+        LibNetworks::Sessions::OutboundSession::OnSent(bytesSent);
     }
 
 private:

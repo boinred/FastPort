@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -133,8 +133,13 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FastPortBenchmark.cpp" />
-    <ClCompile Include="LatencyBenchmarkRunner.cpp" />
-    <ClCompile Include="BenchmarkSession.ixx" />
+    <!-- MSVC Module + Protobuf Conflict - Excluded from build for now -->
+    <ClCompile Include="LatencyBenchmarkRunner.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="BenchmarkSession.ixx">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BenchmarkStats.h" />

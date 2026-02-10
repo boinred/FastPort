@@ -12,6 +12,12 @@ import commons.strconverter;
 namespace LibCommons
 {
 
+export enum class NetworkMode
+{
+    IOCP,
+    RIO
+};
+
 export class ServiceMode : public std::enable_shared_from_this<ServiceMode>
 {
 public:

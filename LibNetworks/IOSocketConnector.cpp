@@ -8,6 +8,9 @@ module networks.core.io_socket_connector;
 
 import std;
 import commons.logger;
+import networks.services.io_service;
+import networks.core.io_consumer;
+
 
 namespace LibNetworks::Core
 {
@@ -25,14 +28,13 @@ static bool UpdateSocketReuseAddr(SOCKET socket)
     return nRet == 0;
 }
 
-std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_ptr<Services::IOService>& pIOService, OnDoFuncCreateSession pOnDoFuncCreateSession, std::string ip, unsigned short port)
+std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_ptr<INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession, std::string ip, unsigned short port)
 {
-    auto pConnector = std::make_shared<IOSocketConnector>(pIOService, pOnDoFuncCreateSession);
+    auto pConnector = std::make_shared<IOSocketConnector>(pService, pOnDoFuncCreateSession);
     if (!pConnector->Connect(ip, port))
     {
         LibCommons::Logger::GetInstance().LogError("IOSocketConnector", "Create - Connect failed. {}:{}", ip, port);
         return nullptr;
-
     }
 
     return pConnector;
@@ -40,8 +42,8 @@ std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_p
 
 
 
-IOSocketConnector::IOSocketConnector(const std::shared_ptr<Services::IOService>& pIOService, OnDoFuncCreateSession pOnDoFuncCreateSession)
-    : m_pIOService(pIOService), m_pOnDoFuncCreateSession(pOnDoFuncCreateSession)
+IOSocketConnector::IOSocketConnector(const std::shared_ptr<INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession)
+    : m_pService(pService), m_pOnDoFuncCreateSession(pOnDoFuncCreateSession)
 {
 
 }
@@ -84,17 +86,21 @@ bool IOSocketConnector::Connect(std::string ip, const unsigned short port)
 
     m_pSession = m_pOnDoFuncCreateSession(m_pSocket);
 
-    // 4. IOCP에 소켓 연결
-    if (!m_pIOService->Associate(m_pSocket->GetSocket(), m_pSession->GetCompletionId()))
+    // 4. IOCP에 소켓 연결 (IOService인 경우에만)
+    if (auto pIOService = std::dynamic_pointer_cast<LibNetworks::Services::IOService>(m_pService))
     {
-        logger.LogError("SocketConnector", "Connect, Associate failed. OutboundSession Id : {}", m_pSession->GetSessionId());
-
-        DisConnect();
-
-        return false;
+        auto pIOConsumer = std::dynamic_pointer_cast<Core::IIOConsumer>(m_pSession);
+        if (pIOConsumer)
+        {
+            if (!pIOService->Associate(m_pSocket->GetSocket(), pIOConsumer->GetCompletionId()))
+            {
+                logger.LogError("SocketConnector", "Connect, Associate failed. OutboundSession Id : {}", m_pSession->GetSessionId());
+                DisConnect();
+                return false;
+            }
+            LibCommons::Logger::GetInstance().LogInfo("SocketConnector", "Connect, IOSocketConnector Associate. OutboundSession Id : {}", m_pSession->GetSessionId());
+        }
     }
-
-    LibCommons::Logger::GetInstance().LogInfo("SocketConnector", "Connect, IOSocketConnector Associate. OutboundSession Id : {}", m_pSession->GetSessionId());
 
     // 5. ConnectEx 함수 포인터 가져오기
     GUID guidConnectEx = WSAID_CONNECTEX;
@@ -142,7 +148,7 @@ bool IOSocketConnector::ConnectEx(std::string ip, const unsigned short port)
         nullptr,										// 전송 버퍼
         0,												// 전송 버퍼 길이
         nullptr,										// 실제 전송된 바이트 수
-        &(m_pSession->GetConnectOverlapped())			// OVERLAPPED 구조체
+        m_pSession->GetConnectOverlappedPtr()			// OVERLAPPED 구조체
     );
 
     if (!bResult)

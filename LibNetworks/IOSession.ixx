@@ -1,26 +1,26 @@
-﻿module;
+module;
 
+#include <WinSock2.h>
 #include <memory>
 #include <vector>
 #include <atomic>
-#include <WinSock2.h>
-
+#include <span>
 #include <google/protobuf/message.h>
 
 export module networks.sessions.io_session;
 
+import networks.sessions.inetwork_session;
 import networks.core.io_consumer;
 import networks.core.socket;
 import networks.core.packet;
 import networks.core.packet_framer;
 import commons.buffers.ibuffer;
-import std; 
 
 namespace LibNetworks::Sessions
 {
 
 
-export class IOSession : public Core::IIOConsumer, public std::enable_shared_from_this<IOSession>
+export class IOSession : public Core::IIOConsumer, public INetworkSession, public std::enable_shared_from_this<IOSession>
 {
 public:
     IOSession() = delete;
@@ -33,22 +33,25 @@ public:
         std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
     // 기본 소멸 처리.
-    virtual ~IOSession() = default;
+    virtual ~IOSession() override = default;
 
     // 세션 고유 식별자 조회.
-    const uint64_t GetSessionId() const { return m_SessionId; }
+    virtual uint64_t GetSessionId() const override { return m_SessionId; }
 
     // Accept 완료 이벤트 처리 훅.
-    virtual void OnAccepted() {}
+    virtual void OnAccepted() override {}
     // Connect 완료 이벤트 처리 훅.
-    virtual void OnConnected() {}
+    virtual void OnConnected() override {}
 
-    void SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage);
+    virtual void SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage) override;
+
+    // (Outbound 전용) ConnectEx용 OVERLAPPED 포인터 반환
+    virtual OVERLAPPED* GetConnectOverlappedPtr() override { return nullptr; }
 
 protected:
 
     // 연결 종료 이벤트 처리
-    virtual void OnDisconnected() {}
+    virtual void OnDisconnected() override {}
 
     // 지속 수신을 위한 Recv 재등록.
     void RequestReceived();

@@ -1,11 +1,14 @@
-﻿module;
+module;
 
 #include <WinSock2.h>
 #include <spdlog/spdlog.h>
+#include <algorithm>
+#include <cstring>
+#include <vector>
+#include <string>
+#include <span>
 
 module networks.sessions.io_session;
-
-import std; 
 
 import commons.logger;
 import networks.core.packet;
@@ -111,16 +114,7 @@ void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Mes
         }
         else
         {
-            // 버퍼가 쪼개져 있거나(Wrap around), 공간이 부족한 경우 (여기선 공간 부족일 리는 없음, Allocate 성공했으므로)
-            // 임시 버퍼 없이 쪼개서 넣거나, Protobuf의 ArrayOutputStream을 여러 개 써야 함.
-            // 간단하게: 임시 버퍼에 직렬화 후 WriteToBuffers (To avoid implementing complex ZeroCopyOutputStream right now)
-            // *하지만* 우리는 "할당 최소화"가 목표이므로, 스택 메모리나 thread_local 버퍼를 활용해야 함.
-            // 여기서는 일단 std::string을 쓰는 기존 방식보다는 낫지만, 완벽한 Zero-Copy는 아님 (Wrap around 시).
-            // 그러나 대부분 패킷은 1개 버퍼에 들어갈 것임.
-            // Wrap around 발생하는 경우에만 임시 복사 발생.
-
-            // TODO: 완벽한 Zero-Copy를 위해 RingBufferOutputStream 구현 필요.
-            // 현재는 간단히 처리.
+            // 버퍼가 쪼개져 있거나(Wrap around), 공간이 부족한 경우
             std::string temp; // Fallback
             rfMessage.SerializeToString(&temp);
             WriteToBuffers(buffers, bufferIdx, offsetInSpan, temp.data(), temp.size());
@@ -215,11 +209,9 @@ bool IOSession::RequestRecv(bool bZeroByte)
 bool IOSession::TryPostSendFromQueue()
 {
     // Send는 outstanding 1개만 유지
-    // 1. 다른 스레드가 이미 전송 작업을 시작했는지 확인 (진입 잠금)
     bool expected = false;
     if (!m_SendInProgress.compare_exchange_strong(expected, true))
     {
-        // 1. 다른 스레드가 이미 전송 작업을 시작했는지 확인 (진입 잠금)
         return true;
     }
 
@@ -229,8 +221,6 @@ bool IOSession::TryPostSendFromQueue()
         return true;
     }
 
-    // 링버퍼에서 전송할 데이터 포인터들을 직접 가져옵니다 (Zero-Copy)
-    // 데이터는 전송이 완료된 후(OnIOCompleted)에 Consume합니다.
     std::vector<std::span<const std::byte>> buffers;
     const size_t bytesToSend = m_pSendBuffer->GetReadBuffers(buffers);
 
@@ -275,10 +265,6 @@ bool IOSession::TryPostSendFromQueue()
         }
     }
 
-    // 성공 또는 Pending 시:
-    // Consume은 여기서 하지 않고, OnIOCompleted 시점에 처리합니다.
-    // 기존의 m_pSendBuffer->Consume(bytesToSend); 제거됨.
-
     return true;
 }
 
@@ -292,13 +278,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
     // 멤버 Overlapped 주소로 구분
     if (pOverlapped == &(m_RecvOverlapped.Overlapped))
     {
-        // atomic flag 잠시 해제 (다음 요청을 위해)
-        // 하지만 여기서 해제하면 PostRealRecv 시 경합? -> PostRealRecv 안에서 다시 true 만듦?
-        // 아니면 true 상태 유지하고, 다 끝나면 false?
-        // "ZeroByte 완료" -> m_RecvInProgress는 여전히 내꺼임.
-        // "RealRecv 완료" -> m_RecvInProgress 내꺼임.
-        // 따라서 여기서 false로 만들지 말고, 흐름에 따라 결정.
-
         if (!bSuccess)
         {
             m_RecvInProgress.store(false);
@@ -310,20 +289,8 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         // 1. Zero-byte Recv 완료 처리
         if (m_RecvOverlapped.IsZeroByte)
         {
-            // Zero-byte Recv 완료 (데이터 도착 알림)
             if (bytesTransferred == 0)
             {
-                
-
-                // 실제 데이터를 읽기 위해 Non-Blocking Recv (or Real Recv) 수행
-                // 여기서는 PostRealRecv 호출. 이 함수는 실패 시 m_RecvInProgress = false 처리 해야 함.
-                // 편의상 여기서 atomic flag를 일단 false로 하고 다시 try?
-                // 아니면 그대로 pass? -> PostRealRecv 수정이 필요함 (atomic check 제거 버전 필요하거나...)
-                // 위에서 수정한 PostRealRecv는 atomic check 없음. 
-                // 단, 외부에서 호출하는 경우(RequestReceived)와 겹치지 않게 주의.
-                // RequestReceived는 PostZeroByteRecv를 호출함.
-
-                // PostRealRecv는 OnIOCompleted에서 호출되므로 m_RecvInProgress가 true 상태라고 가정하거나, 흐름상 안전하다고 판단.
                 if (!RequestRecv(false))
                 {
                     m_RecvInProgress.store(false);
@@ -333,8 +300,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             }
             else
             {
-                // Zero-byte 요청했는데 bytes > 0 일 수는 없음 (버퍼크기 0이라서).
-                // 혹시 모르니 종료 처리
                 m_RecvInProgress.store(false);
                 return;
             }
@@ -343,7 +308,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         {
             if (bytesTransferred == 0)
             {
-                // 실제 Recv 걸었는데 0이면 연결 종료
                 m_RecvInProgress.store(false);
                 LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv 0 byte (Real). Disconnected. Session Id : {}", GetSessionId());
                 RequestDisconnect();
@@ -361,9 +325,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
 
             ReadReceivedBuffers();
 
-            // 다 처리했으면 다시 Zero-byte Recv 걸기
-            // 여기서 m_RecvInProgress를 false로 하고 RequestReceived() 호출?
-            // 아니면 그냥 PostZeroByteRecv?
             m_RecvInProgress.store(false);
             RequestReceived();
 
@@ -388,13 +349,6 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         if (m_pSendBuffer)
         {
             m_pSendBuffer->Consume(bytesTransferred);
-        }
-
-        if (requested > 0 && bytesTransferred < requested)
-        {
-            // TODO: 부분 전송 처리. 
-            // 현재 로직상으로는 다음 TryPostSendFromQueue에서 남은 데이터를 다시 시도함.
-            LibCommons::Logger::GetInstance().LogDebug("IOSession", "OnIOCompleted() Partial send. Session Id : {}, Requested : {}, Transferred : {}", GetSessionId(), requested, bytesTransferred);
         }
 
         OnSent(bytesTransferred);

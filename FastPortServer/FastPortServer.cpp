@@ -39,6 +39,10 @@ int main(int argc, const char* argv[])
     LibCommons::EventListener::GetInstance().Init(std::thread::hardware_concurrency());
 
     std::shared_ptr<FastPortServiceMode>  pServiceMode = std::make_shared<FastPortServiceMode>();
+    if (!pServiceMode->ParseArgs(argc, argv))
+    {
+        return 0;
+    }
     pServiceMode->Execute(argc, argv);
 
     logger.LogInfo("Main", "FastPort Started. V : {}", "Started.");
