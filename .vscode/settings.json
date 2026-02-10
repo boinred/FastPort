@@ -3,5 +3,13 @@
         "_Builds": true,
         "_Intermediate": true,
         "vcpkg_installed": true
-    }
+    },
+    "files.associations": {
+        "*.ixx": "cpp"
+    },
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.default.cppStandard": "c++20",
+    "C_Cpp.default.cStandard": "c17",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.intelliSenseEngineFallback": "enabled"
 }

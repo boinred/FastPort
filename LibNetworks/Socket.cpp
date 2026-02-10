@@ -244,4 +244,35 @@ bool Socket::UpdateAcceptContext(SOCKET listenSocket) const
     return true;
 }
 
+bool Socket::Disconnect(OVERLAPPED* pOverlapped, DWORD dwFlags)
+{
+    static LPFN_DISCONNECTEX lpfnDisconnectEx = nullptr;
+
+    if (lpfnDisconnectEx == nullptr)
+    {
+        GUID guidDisconnectEx = WSAID_DISCONNECTEX;
+        DWORD dwBytes = 0;
+        if (SOCKET_ERROR == ::WSAIoctl(m_Socket, SIO_GET_EXTENSION_FUNCTION_POINTER,
+            &guidDisconnectEx, sizeof(guidDisconnectEx),
+            &lpfnDisconnectEx, sizeof(lpfnDisconnectEx),
+            &dwBytes, nullptr, nullptr))
+        {
+            LibCommons::Logger::GetInstance().LogError("Socket", "Disconnect: WSAIoctl(SIO_GET_EXTENSION_FUNCTION_POINTER) failed. Error: {}", ::WSAGetLastError());
+            return false;
+        }
+    }
+
+    if (FALSE == lpfnDisconnectEx(m_Socket, pOverlapped, dwFlags, 0))
+    {
+        int error = ::WSAGetLastError();
+        if (error != ERROR_IO_PENDING)
+        {
+            LibCommons::Logger::GetInstance().LogError("Socket", "Disconnect: DisconnectEx failed. Error: {}", error);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 } // namespace LibNetworks::Core

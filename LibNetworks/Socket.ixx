@@ -84,6 +84,9 @@ public:
     // AcceptEx 호출 후 Accept Context 업데이트
     bool UpdateAcceptContext(SOCKET listenSocket) const;
 
+    // DisconnectEx 호출 (소켓 재사용 가능)
+    bool Disconnect(OVERLAPPED* pOverlapped, DWORD dwFlags);
+
     // Nagle 알고리즘 비활성화 설정 (TCP_NODELAY)
     bool UpdateContextDisableNagleAlgorithm() const;
 

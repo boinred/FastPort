@@ -233,6 +233,18 @@ stateDiagram-v2
 
 ---
 
+### 7. 주요 성능 최적화 기법
+
+|기법 | 설명 |
+|------|----|
+| Zero-Byte Recv |	알림 전용 WSARecv로 유휴 소켓 커널 잠금 방지 |
+| Scatter-Gather I/O |	링 버퍼 span을 WSABUF[]로 직접 전달 (복사 제거) |
+| Pre-posted Accept |	100개 AcceptEx 사전 게시로 수락 지연 최소화 |
+| TCP_NODELAY |	Nagle 알고리즘 비활성화 (저지연) |
+| SO_RCVBUF/SNDBUF=0 |	커널 버퍼링 제거 (Zero-Copy) |
+| Atomic CAS |	뮤텍스 없이 1-outstanding 전송 보장 |
+| OVERLAPPED 재사용 |	멤버 변수로 힙 할당 회피 |
+
 ## 🔧 빌드 및 실행
 
 ### 요구 사항
