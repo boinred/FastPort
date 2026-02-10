@@ -23,6 +23,7 @@
     <File Path=".editorconfig" />
     <File Path=".gitignore" />
     <File Path="README.md" />
+    <File Path="RIO_PLAN.md" />
     <File Path="vcpkg-configuration.json" />
     <File Path="vcpkg.json" />
   </Folder>
