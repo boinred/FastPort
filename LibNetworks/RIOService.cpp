@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <WinSock2.h>
 #include <MSWSock.h>
@@ -76,7 +76,7 @@ void RIOService::Stop()
 void RIOService::WorkerLoop()
 {
     constexpr uint32_t MAX_RESULTS = 128;
-    RIORESULT results[MAX_RESULTS];
+    RIORESULT results[MAX_RESULTS] = {};
 
     while (m_bIsRunning)
     {

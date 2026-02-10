@@ -79,9 +79,6 @@
     <ClCompile Include="INetworkSession.ixx">
       <Filter>Sessions</Filter>
     </ClCompile>
-    <ClCompile Include="RioConsumer.ixx">
-      <Filter>Core</Filter>
-    </ClCompile>
     <ClCompile Include="RioContext.ixx">
       <Filter>Core</Filter>
     </ClCompile>
@@ -89,6 +86,9 @@
       <Filter>Services</Filter>
     </ClCompile>
     <ClCompile Include="RIOService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="RioConsumer.ixx">
       <Filter>Services</Filter>
     </ClCompile>
   </ItemGroup>

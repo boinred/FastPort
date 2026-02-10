@@ -1,4 +1,4 @@
-#ifndef _WIN32_WINNT
+﻿#ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0602
 #endif
 
@@ -7,6 +7,7 @@ module;
 #include <WinSock2.h>
 #include <MSWSock.h>
 #include <guiddef.h>
+#include <spdlog/spdlog.h>
 
 // WSAID_MULTIPLE_RIO_QUERY_EXTENSION_FUNCTIONS GUID 직접 정의 (0x8509e081, 0x96dd, 0x4005, 0xb1, 0xe3, 0xd2, 0xdd, 0x90, 0x71, 0x7f, 0x67)
 #ifndef WSAID_MULTIPLE_RIO_QUERY_EXTENSION_FUNCTIONS
@@ -15,7 +16,9 @@ module;
 
 module networks.core.rio_extension;
 
+
 import std;
+import commons.logger;
 
 namespace LibNetworks::Core
 {
@@ -32,6 +35,7 @@ bool RioExtension::Initialize(SOCKET socket)
 
     if (socket == INVALID_SOCKET)
     {
+        LibCommons::Logger::GetInstance().LogError("RioExtension", "Initialize: Invalid socket provided.");
         return false;
     }
 
@@ -52,6 +56,8 @@ bool RioExtension::Initialize(SOCKET socket)
 
     if (result == SOCKET_ERROR)
     {
+        LibCommons::Logger::GetInstance().LogError("RioExtension", "Initialize: WSAIoctl(SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER) failed. Error: {}", ::WSAGetLastError());
+
         return false;
     }
 

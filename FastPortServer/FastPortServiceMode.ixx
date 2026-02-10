@@ -162,21 +162,13 @@ protected:
 
 private:
 
-
-
     const unsigned short C_LISTEN_PORT = 6628;
 
-
-
     LibCommons::NetworkMode m_NetworkMode = LibCommons::NetworkMode::IOCP;
-
-
 
     LibNetworks::Core::Socket m_ListenSocket{};
 
     std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> m_Acceptor{};
-
-
 
     std::shared_ptr<LibNetworks::Services::RIOService> m_RioService{};
 

@@ -49,7 +49,7 @@ int main(int argc, const char* argv[])
 #if _DEBUG 
     pServiceMode->Wait();
 #endif // #if _DEBUG
-    logger.LogInfo("Main", "FastPort Started. V : {}", "Closed.");    
+    logger.LogInfo("Main", "FastPort Started. V : {}", "Closed.");
 }
 
 // 프로그램 실행: <Ctrl+F5> 또는 [디버그] > [디버깅하지 않고 시작] 메뉴
