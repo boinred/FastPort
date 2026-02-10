@@ -159,6 +159,7 @@
   <ItemGroup>
     <ClCompile Include="LibNetworksTests.cpp" />
     <ClCompile Include="PacketFramerTests.cpp" />
+    <ClCompile Include="RioBufferManagerTests.cpp" />
     <ClCompile Include="RioFoundationTests.cpp" />
   </ItemGroup>
   <ItemGroup>

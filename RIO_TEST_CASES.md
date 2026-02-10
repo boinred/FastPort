@@ -8,10 +8,10 @@ This document outlines the test cases required to verify the integrity and perfo
 - [x] **Invalid Socket Handling**: Verify that initialization fails correctly when provided with an `INVALID_SOCKET`.
 
 ## 2. Memory Management (RioBufferManager)
-- [ ] **Pool Initialization**: Verify that `VirtualAlloc` and `RIORegisterBuffer` succeed for the requested pool size (e.g., 64MB).
-- [ ] **Slice Allocation**: Verify that `AllocateSlice` correctly subdivides the pool and assigns valid `RIO_BUFFERID` and offsets.
-- [ ] **Pool Exhaustion**: Test the behavior when the pool is completely allocated (ensure thread-safe failure or growth logic).
-- [ ] **Alignment Check**: Confirm that all allocated slices meet RIO's memory alignment requirements.
+- [x] **Pool Initialization**: Verify that `VirtualAlloc` and `RIORegisterBuffer` succeed for the requested pool size (e.g., 64MB).
+- [x] **Slice Allocation**: Verify that `AllocateSlice` correctly subdivides the pool and assigns valid `RIO_BUFFERID` and offsets.
+- [x] **Pool Exhaustion**: Test the behavior when the pool is completely allocated (ensure thread-safe failure or growth logic).
+- [x] **Alignment Check**: Confirm that all allocated slices meet RIO's memory alignment requirements.
 
 ## 3. RIOService (Completion Queue)
 - [ ] **CQ Creation**: Verify that `RIOCreateCompletionQueue` succeeds with the specified maximum results.
@@ -49,10 +49,10 @@ This document outlines the test cases required to verify the integrity and perfo
 - [x] **유효하지 않은 소켓 처리**: `INVALID_SOCKET`이 전달되었을 때 초기화 실패가 올바르게 처리되는지 확인.
 
 ## 2. 메모리 관리 (RioBufferManager)
-- [ ] **풀 초기화**: 요청된 풀 크기(예: 64MB)에 대해 `VirtualAlloc` 및 `RIORegisterBuffer`가 성공하는지 확인.
-- [ ] **슬라이스 할당**: `AllocateSlice`가 풀을 올바르게 분할하고 유효한 `RIO_BUFFERID`와 오프셋을 할당하는지 확인.
-- [ ] **풀 고갈**: 풀이 모두 할당되었을 때의 동작(스레드 안전한 실패 또는 확장 로직) 확인.
-- [ ] **정렬 확인**: 할당된 모든 슬라이스가 RIO의 메모리 정렬 요구사항을 충족하는지 확인.
+- [x] **풀 초기화**: 요청된 풀 크기(예: 64MB)에 대해 `VirtualAlloc` 및 `RIORegisterBuffer`가 성공하는지 확인.
+- [x] **슬라이스 할당**: `AllocateSlice`가 풀을 올바르게 분할하고 유효한 `RIO_BUFFERID`와 오프셋을 할당하는지 확인.
+- [x] **풀 고갈**: 풀이 모두 할당되었을 때의 동작(스레드 안전한 실패 또는 확장 로직) 확인.
+- [x] **정렬 확인**: 할당된 모든 슬라이스가 RIO의 메모리 정렬 요구사항을 충족하는지 확인.
 
 ## 3. RIOService (완료 큐)
 - [ ] **CQ 생성**: 지정된 최대 결과 수로 `RIOCreateCompletionQueue`가 성공하는지 확인.
