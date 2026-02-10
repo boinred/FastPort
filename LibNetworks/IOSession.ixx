@@ -93,11 +93,9 @@ private:
     };
 
 private:
-    // 비동기 0바이트 수신(WSARecv) 등록.
-    bool PostZeroByteRecv();
-
-    // 실제 데이터 수신(WSARecv) 등록.
-    bool PostRealRecv();
+    
+    // Recv 요청 공통 구현
+    bool RequestRecv(bool bZeroByte);
 
     // 송신 큐 기반 비동기 송신(WSASend) 등록.
     bool TryPostSendFromQueue();
