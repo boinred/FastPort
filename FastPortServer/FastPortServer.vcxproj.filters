@@ -5,5 +5,8 @@
     <ClCompile Include="FastPortInboundSession.cpp" />
     <ClCompile Include="FastPortInboundSession.ixx" />
     <ClCompile Include="FastPortServiceMode.ixx" />
+    <ClCompile Include="FastPortServiceMode.cpp" />
+    <ClCompile Include="RIOInboundSession.ixx" />
+    <ClCompile Include="RIOInboundSession.cpp" />
   </ItemGroup>
 </Project>

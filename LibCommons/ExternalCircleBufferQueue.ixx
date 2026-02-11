@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <vector>
 #include <algorithm>
@@ -16,7 +16,7 @@ namespace LibCommons::Buffers
 
 /**
  * 외부에서 관리되는 메모리(std::span)를 사용하는 원형 버퍼 큐.
- * RIO와 같이 미리 등록된 메모리를 사용해야 하는 경우 유용합니다.
+ * RIO와 같이 미리 등록된 메모리를 사용해야 하는 경우 유용.
  */
 export class ExternalCircleBufferQueue final : public IBuffer
 {

@@ -59,7 +59,7 @@ void RIOSession::RequestRecv()
         return;
     }
 
-    RIO_BUF buf;
+    RIO_BUF buf{};
     buf.BufferId = m_RecvSlice.BufferId;
     buf.Offset = m_RecvSlice.Offset;
     buf.Length = m_RecvSlice.Length;
@@ -139,7 +139,7 @@ void RIOSession::TryPostSendFromQueue()
         return;
     }
 
-    RIO_BUF buf;
+    RIO_BUF buf{};
     buf.BufferId = m_SendSlice.BufferId;
     buf.Offset = m_SendSlice.Offset + static_cast<ULONG>(reinterpret_cast<const uint8_t*>(readBuffers[0].data()) - reinterpret_cast<const uint8_t*>(m_SendSlice.pData));
     buf.Length = static_cast<ULONG>(readBuffers[0].size());

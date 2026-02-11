@@ -15,9 +15,9 @@ import networks.core.io_socket_acceptor;
 import networks.services.rio_service;
 import networks.core.rio_buffer_manager;
 import networks.core.rio_extension;
-import networks.sessions.rio_session;
 import networks.sessions.inetwork_session;
 import fastport_inbound_session;
+import rio_inbound_session;
 
 bool FastPortServiceMode::ParseArgs(int argc, const char* argv[])
 {
@@ -116,7 +116,7 @@ void FastPortServiceMode::StartRioMode()
             m_RioBufferManager->AllocateSlice(C_RIO_RECV_BUFFER_SIZE, recvSlice);
             m_RioBufferManager->AllocateSlice(C_RIO_SEND_BUFFER_SIZE, sendSlice);
 
-            auto pSession = std::make_shared<LibNetworks::Sessions::RIOSession>(pSocket, recvSlice, sendSlice, m_RioService->GetCompletionQueue());
+            auto pSession = std::make_shared<RIOInboundSession>(pSocket, recvSlice, sendSlice, m_RioService->GetCompletionQueue());
 
             pSession->Initialize();
             return pSession;

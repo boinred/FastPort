@@ -139,6 +139,8 @@
     <ClCompile Include="FastPortServer.cpp" />
     <ClCompile Include="FastPortServiceMode.cpp" />
     <ClCompile Include="FastPortServiceMode.ixx" />
+    <ClCompile Include="RIOInboundSession.cpp" />
+    <ClCompile Include="RIOInboundSession.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">

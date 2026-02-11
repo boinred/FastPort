@@ -211,7 +211,7 @@ public:
         m_Size = 0;
     }
 
-    // (Direct I/O Recv) 현재 쓰기 가능한 모든 연속된 메모리 블록들을 반환합니다.
+    // (Direct I/O Recv) 현재 쓰기 가능한 모든 연속된 메모리 블록들을 반환.
     size_t GetWriteableBuffers(std::vector<std::span<std::byte>>& outBuffers) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
@@ -239,7 +239,7 @@ public:
         return freeSpace;
     }
 
-    // (Direct I/O Recv) 쓰기 작업 완료 후, 실제로 쓴 크기만큼 포인터(Head)를 이동시킵니다.
+    // (Direct I/O Recv) 쓰기 작업 완료 후, 실제로 쓴 크기만큼 포인터(Head)를 이동.
     bool CommitWrite(size_t size) override
     {
         auto lock = LibCommons::WriteLockBlock(m_RWLock);
