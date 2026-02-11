@@ -17,7 +17,7 @@ import benchmark.latency_runner;
 using namespace FastPortBenchmark;
 
 // 타임스탬프 문자열 생성 (YYYY-MM-DD-HH-mm)
-std::string GetTimestampString()
+static std::string GetTimestampString()
 {
     auto now = std::chrono::system_clock::now();
     // C++20 format 사용
@@ -25,7 +25,7 @@ std::string GetTimestampString()
 }
 
 // 파일명에 타임스탬프 추가
-std::string AddTimestampToFilename(const std::string& filename)
+static std::string AddTimestampToFilename(const std::string& filename)
 {
     std::string timestamp = GetTimestampString();
 
@@ -133,7 +133,7 @@ Examples:
 
 
 // 진행률 표시
-void PrintProgress(size_t current, size_t total)
+static void PrintProgress(size_t current, size_t total)
 {
     static size_t lastPercent = 0;
     size_t percent = (current * 100) / total;
@@ -146,7 +146,7 @@ void PrintProgress(size_t current, size_t total)
 }
 
 // CSV 저장
-void SaveResultsToCsv(const std::string& baseFilename, const std::vector<BenchmarkStats>& results)
+static void SaveResultsToCsv(const std::string& baseFilename, const std::vector<BenchmarkStats>& results)
 {
     std::string filename = AddTimestampToFilename(baseFilename);
 
@@ -167,7 +167,7 @@ void SaveResultsToCsv(const std::string& baseFilename, const std::vector<Benchma
 }
 
 // 디버그 모드에서 키 입력 대기
-void WaitForKeyInDebugMode()
+static void WaitForKeyInDebugMode()
 {
 #ifdef _DEBUG
     std::cout << "\nPress any key to exit..." << std::endl;

@@ -330,6 +330,90 @@ namespace LibNetworksTests
 
             pSocket->Close();
         }
+
+        // 대형 패킷(1MB) 전송 및 분할 처리 테스트
+        TEST_METHOD(TestLargePacketTransfer)
+        {
+            LibNetworks::Services::RIOService service;
+            Assert::IsTrue(service.Initialize(1024));
+            Assert::IsTrue(service.Start(1));
+
+            LibNetworks::Core::RioBufferManager bufferManager;
+            // 1MB 이상 전송하려면 충분한 메모리 풀 필요 (2MB)
+            Assert::IsTrue(bufferManager.Initialize(2 * 1024 * 1024));
+
+            LibNetworks::Core::Socket listener;
+            Assert::IsTrue(listener.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO));
+
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            addr.sin_port = 0;
+            Assert::AreEqual(0, bind(listener.GetSocket(), (sockaddr*)&addr, sizeof(addr)));
+            Assert::AreEqual(0, listen(listener.GetSocket(), 1));
+
+            int addrLen = sizeof(addr);
+            getsockname(listener.GetSocket(), (sockaddr*)&addr, &addrLen);
+
+            SOCKET clientSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            Assert::AreEqual(0, connect(clientSock, (sockaddr*)&addr, sizeof(addr)));
+
+            SOCKET acceptedSock = accept(listener.GetSocket(), nullptr, nullptr);
+            auto pSessionSocket = std::make_shared<LibNetworks::Core::Socket>(acceptedSock);
+
+            // 송신 버퍼 64KB (패킷은 1MB이므로 여러 번 나누어 보내야 함)
+            // 수신 버퍼 4KB
+            LibNetworks::Core::RioBufferSlice recvSlice, sendSlice;
+            Assert::IsTrue(bufferManager.AllocateSlice(4096, recvSlice));
+            Assert::IsTrue(bufferManager.AllocateSlice(64 * 1024, sendSlice));
+
+            auto pSession = std::make_shared<MockRioSession>(pSessionSocket, recvSlice, sendSlice, service.GetCompletionQueue());
+            Assert::IsTrue(pSession->Initialize());
+
+            // 1MB 데이터 생성
+            size_t payloadSize = 1024 * 1024;
+            std::string largeData(payloadSize, 'A');
+            
+            fastport::protocols::tests::EchoRequest req;
+            req.set_data_str(largeData);
+
+            // 전송 시작 (내부적으로 RingBuffer에 쓰면서 여러 번 Send 요청)
+            pSession->SendMessage(999, req);
+
+            // 클라이언트 수신 (Total Expected Bytes)
+            // Header(2) + ID(2) + ProtoSize(varint) + ProtoData(1MB)
+            size_t totalReceived = 0;
+            size_t expectedMinSize = payloadSize; 
+            std::array<char, 8192> recvBuf{};
+
+            auto startTime = std::chrono::steady_clock::now();
+            while (totalReceived < expectedMinSize)
+            {
+                int received = recv(clientSock, recvBuf.data(), static_cast<int>(recvBuf.size()), 0);
+                if (received > 0)
+                {
+                    totalReceived += received;
+                }
+                else if (received == 0 || received == SOCKET_ERROR)
+                {
+                    break;
+                }
+
+                if (std::chrono::steady_clock::now() - startTime > std::chrono::seconds(5))
+                {
+                    Assert::Fail(L"Timeout receiving large packet");
+                    break;
+                }
+            }
+
+            Assert::IsTrue(totalReceived >= expectedMinSize, L"Failed to receive full large packet");
+
+            // 정리
+            service.Stop();
+            pSessionSocket->Close();
+            listener.Close();
+            closesocket(clientSock);
+        }
     };
 
     LibNetworks::Core::Socket RioSessionTests::s_DummySocket;

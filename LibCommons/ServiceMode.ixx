@@ -35,7 +35,7 @@ public:
 
     static bool Run(std::shared_ptr<ServiceMode> pService);
 
-    void Wait();
+    void Wait() const;
 
     std::string FileVersion() const { return m_FileVersion; }
     void FileVersion(std::string val) { m_FileVersion = val; }

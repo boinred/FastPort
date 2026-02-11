@@ -473,7 +473,7 @@ bool ServiceMode::Run(std::shared_ptr<ServiceMode> pService)
 }
 
 
-void ServiceMode::Wait()
+void ServiceMode::Wait() const
 {
     while (m_bRunning)
     {

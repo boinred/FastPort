@@ -24,7 +24,7 @@ private:
 	SRWLOCK m_SRWLock{};
 };
 
-class ReferenceReadLockBlock
+export class ReferenceReadLockBlock
 {
 public:
 	ReferenceReadLockBlock(RWLock& rfRWLock);
@@ -39,7 +39,7 @@ private:
 	RWLock& m_rfRWLock;
 };
 
-class ReferenceWriteLockBlock
+export class ReferenceWriteLockBlock
 {
 public:
 	ReferenceWriteLockBlock(RWLock& rfRWLock);

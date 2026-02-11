@@ -14,8 +14,6 @@
     <File Path="docs/PROJECT_STRUCTURE.md" />
     <File Path="docs/README_DOCS.md" />
     <File Path="docs/RIO_FEATURES.md" />
-    <File Path="docs/RIO_PLAN.md" />
-    <File Path="docs/RIO_TEST_CASES.md" />
   </Folder>
   <Folder Name="/docs/benchmark/">
     <File Path="docs/benchmark-results-01-baseline.md" />

@@ -71,6 +71,9 @@ private:
     // 버퍼에 데이터 기록
     void WriteToBuffers(const std::vector<std::span<std::byte>>& buffers, size_t& offset, const void* pData, size_t len);
 
+    // 대기 중인 전송 데이터 처리
+    void FlushPendingSendQueue();
+
 private:
     // 연결된 소켓
     std::shared_ptr<Core::Socket> m_pSocket;
@@ -91,6 +94,23 @@ private:
     std::atomic<bool> m_bSendInProgress = false;
     // 연결 종료 상태
     std::atomic<bool> m_bIsDisconnected = false;
+
+    // 대기 중인 패킷 정보를 담는 구조체
+    struct PendingPacket
+    {
+        std::vector<std::byte> Data;
+        size_t Offset = 0;
+    };
+
+    // 대기 중인 전송 데이터 큐
+    std::deque<PendingPacket> m_PendingSendQueue;
+    // 전송 큐 동기화용 뮤텍스
+    std::mutex m_SendQueueMutex;
+
+    // 대기 중인 총 바이트 수 (Backpressure용)
+    std::atomic<size_t> m_PendingTotalBytes = 0;
+    // 최대 대기 허용 바이트 (10MB) - 초과 시 연결 종료
+    static constexpr size_t MAX_PENDING_BYTES = 10 * 1024 * 1024;
 
     // 세션 ID
     uint64_t m_SessionId = m_NextSessionId.fetch_add(1, std::memory_order_relaxed);
