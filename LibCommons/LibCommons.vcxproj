@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CircleBufferQueue.ixx" />
+    <ClCompile Include="ExternalCircleBufferQueue.ixx" />
     <ClCompile Include="EventListener.ixx" />
     <ClCompile Include="IBuffer.ixx" />
     <ClCompile Include="Logger.cpp" />

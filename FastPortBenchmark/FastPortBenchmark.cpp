@@ -1,66 +1,34 @@
 ﻿/**
  * FastPortBenchmark
- * 
- * IOCP 네트워크 성능 벤치마크 도구
- * 
- * 측정 항목:
- * - Latency (RTT): 요청-응답 왕복 시간
- * - Throughput: 초당 패킷/바이트 처리량
- * 
- * 사용법:
- *   FastPortBenchmark.exe [옵션]
- * 
- * 옵션:
- *   --host <ip>         서버 주소 (기본: 127.0.0.1)
- *   --port <port>       서버 포트 (기본: 9000)
- *   --iterations <n>    반복 횟수 (기본: 10000)
- *   --warmup <n>        워밍업 횟수 (기본: 100)
- *   --payload <bytes>   페이로드 크기 (기본: 64)
- *   --output <file>     CSV 결과 파일 (자동 타임스탬프 추가)
- *   --verbose           상세 출력
+ *
+ * IOCP/RIO Network Performance Benchmark Tool
  */
 
-#include <iostream>
-#include <string>
-#include <vector>
-#include <fstream>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
-#include <WinSock2.h>
-#include <WS2tcpip.h>
+#include <stdint.h>
+#include <format>
 
-#pragma comment(lib, "ws2_32.lib")
-
-#include "BenchmarkStats.h"
-#include "BenchmarkRunner.h"
-#include "LatencyBenchmarkRunner.h"
-
+import std; 
 import networks.core.socket;
 import commons.logger;
-import std; 
+import benchmark.stats;
+import benchmark.runner;
+import benchmark.latency_runner;
 
 using namespace FastPortBenchmark;
 
 // 타임스탬프 문자열 생성 (YYYY-MM-DD-HH-mm)
-std::string GetTimestampString()
+static std::string GetTimestampString()
 {
     auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    
-    std::tm tm{};
-    localtime_s(&tm, &time);
-    
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%Y-%m-%d-%H-%M-%S");
-    return oss.str();
+    // C++20 format 사용
+    return std::format("{:%Y-%m-%d-%H-%M-%S}", std::chrono::zoned_time{ std::chrono::current_zone(), now });
 }
 
 // 파일명에 타임스탬프 추가
-std::string AddTimestampToFilename(const std::string& filename)
+static std::string AddTimestampToFilename(const std::string& filename)
 {
     std::string timestamp = GetTimestampString();
-    
+
     // 확장자 분리
     size_t dotPos = filename.rfind('.');
     if (dotPos != std::string::npos)
@@ -79,13 +47,14 @@ std::string AddTimestampToFilename(const std::string& filename)
 struct CommandLineArgs
 {
     std::string host = "127.0.0.1";
-    uint16_t port = 6628;
+    uint16_t port = 9000;
     size_t iterations = 10000;
     size_t warmup = 100;
     size_t payloadSize = 64;
     std::string outputFile;
     bool verbose = false;
     bool help = false;
+    bool useRio = false;
 
     static CommandLineArgs Parse(int argc, char* argv[])
     {
@@ -119,6 +88,11 @@ struct CommandLineArgs
             {
                 args.outputFile = argv[++i];
             }
+            else if (arg == "--mode" && i + 1 < argc)
+            {
+                std::string mode = argv[++i];
+                if (mode == "rio") args.useRio = true;
+            }
             else if (arg == "--verbose")
             {
                 args.verbose = true;
@@ -135,13 +109,14 @@ struct CommandLineArgs
     static void PrintUsage()
     {
         std::cout << R"(
-FastPortBenchmark - IOCP Network Performance Benchmark
+FastPortBenchmark - Network Performance Benchmark
 
 Usage: FastPortBenchmark.exe [options]
 
 Options:
   --host <ip>         Server address (default: 127.0.0.1)
   --port <port>       Server port (default: 9000)
+  --mode <mode>       Network mode: iocp (default) or rio
   --iterations <n>    Number of iterations (default: 10000)
   --warmup <n>        Warmup iterations (default: 100)
   --payload <bytes>   Payload size in bytes (default: 64)
@@ -150,17 +125,15 @@ Options:
   --help, -h          Show this help
 
 Examples:
-  FastPortBenchmark.exe --iterations 1000 --payload 256
+  FastPortBenchmark.exe --mode rio --iterations 10000
   FastPortBenchmark.exe --host 192.168.1.100 --port 9001 --output results.csv
-
-Note: Output filename will have timestamp appended (e.g., results_2024-01-15-14-30.csv)
 )";
     }
 };
 
 
 // 진행률 표시
-void PrintProgress(size_t current, size_t total)
+static void PrintProgress(size_t current, size_t total)
 {
     static size_t lastPercent = 0;
     size_t percent = (current * 100) / total;
@@ -173,10 +146,10 @@ void PrintProgress(size_t current, size_t total)
 }
 
 // CSV 저장
-void SaveResultsToCsv(const std::string& baseFilename, const std::vector<BenchmarkStats>& results)
+static void SaveResultsToCsv(const std::string& baseFilename, const std::vector<BenchmarkStats>& results)
 {
     std::string filename = AddTimestampToFilename(baseFilename);
-    
+
     std::ofstream file(filename);
     if (!file.is_open())
     {
@@ -194,7 +167,7 @@ void SaveResultsToCsv(const std::string& baseFilename, const std::vector<Benchma
 }
 
 // 디버그 모드에서 키 입력 대기
-void WaitForKeyInDebugMode()
+static void WaitForKeyInDebugMode()
 {
 #ifdef _DEBUG
     std::cout << "\nPress any key to exit..." << std::endl;
@@ -210,7 +183,6 @@ int main(int argc, char* argv[])
     if (args.help)
     {
         CommandLineArgs::PrintUsage();
-        //WaitForKeyInDebugMode();
         return 0;
     }
 
@@ -218,18 +190,14 @@ int main(int argc, char* argv[])
 
     std::cout << "Current Path : " << location << std::endl;
 
-    std::time_t t = std::time(nullptr);
-
-    std::tm now{};
-    localtime_s(&now, &t);
-    std::string fileName = std::format("log_{:04}_{:02}_{:02}_{:02}_{:02}.txt", now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour, now.tm_min);   
+    auto now = std::chrono::system_clock::now();
+    std::string fileName = std::format("log_{:%Y_%m_%d_%H_%M}.txt", std::chrono::zoned_time{ std::chrono::current_zone(), now });
 
     // Create Logger 
     LibCommons::Logger::GetInstance().Create(location + "/" + "loggers_benchmark", fileName, 1024 * 1024 * 10, 3, false);
 
     // Winsock 초기화
     LibNetworks::Core::Socket::Initialize();
-    
 
     std::cout << "======================================\n";
     std::cout << " FastPort Benchmark\n";
@@ -249,67 +217,67 @@ int main(int argc, char* argv[])
     config.warmupIterations = args.warmup;
     config.payloadSize = args.payloadSize;
     config.verbose = args.verbose;
+    config.useRio = args.useRio;
 
     // 결과 저장용
     std::vector<BenchmarkStats> allResults;
     BenchmarkStats finalResult;
     bool completed = false;
-    std::atomic<bool> finished{false};
+    std::atomic<bool> finished{ false };
 
     // 콜백 설정
     BenchmarkCallbacks callbacks;
 
     callbacks.onStateChanged = [&](BenchmarkState state)
-    {
-        switch (state)
         {
-        case BenchmarkState::Connecting:
-            std::cout << "Connecting to server..." << std::endl;
-            break;
-        case BenchmarkState::Warmup:
-            std::cout << "Warming up..." << std::endl;
-            break;
-        case BenchmarkState::Running:
-            std::cout << "Running benchmark..." << std::endl;
-            break;
-        case BenchmarkState::Completed:
-            std::cout << "\nBenchmark completed!" << std::endl;
-            completed = true;
-            finished.store(true);
-            break;
-        case BenchmarkState::Failed:
-            std::cout << "\nBenchmark failed!" << std::endl;
-            finished.store(true);
-            break;
-        default:
-            break;
-        }
-    };
+            switch (state)
+            {
+            case BenchmarkState::Connecting:
+                std::cout << "Connecting to server..." << std::endl;
+                break;
+            case BenchmarkState::Warmup:
+                std::cout << "Warming up..." << std::endl;
+                break;
+            case BenchmarkState::Running:
+                std::cout << "Running benchmark..." << std::endl;
+                break;
+            case BenchmarkState::Completed:
+                std::cout << "\nBenchmark completed!" << std::endl;
+                completed = true;
+                finished.store(true);
+                break;
+            case BenchmarkState::Failed:
+                std::cout << "\nBenchmark failed!" << std::endl;
+                finished.store(true);
+                break;
+            default:
+                break;
+            }
+        };
 
     callbacks.onProgress = [&](size_t current, size_t total)
-    {
-        PrintProgress(current, total);
-    };
+        {
+            PrintProgress(current, total);
+        };
 
     callbacks.onCompleted = [&](const BenchmarkStats& stats)
-    {
-        finalResult = stats;
-        allResults.push_back(stats);
-        std::cout << "\n" << stats.ToString() << std::endl;
-    };
+        {
+            finalResult = stats;
+            allResults.push_back(stats);
+            std::cout << "\n" << stats.ToString() << std::endl;
+        };
 
     callbacks.onError = [&](const std::string& error)
-    {
-        std::cerr << "Error: " << error << std::endl;
-        finished.store(true);
-    };
+        {
+            std::cerr << "Error: " << error << std::endl;
+            finished.store(true);
+        };
 
     // 벤치마크 실행
     auto runner = std::make_unique<LatencyBenchmarkRunner>();
     if (!runner->Start(config, callbacks))
     {
         std::cerr << "Failed to start benchmark" << std::endl;
-        //WaitForKeyInDebugMode();
         return 1;
     }
 

@@ -7,7 +7,10 @@
 
 module networks.core.io_socket_acceptor;
 
+import std;
 import commons.logger;
+import networks.services.io_service;
+import networks.core.io_consumer;
 
 namespace LibNetworks::Core
 {
@@ -15,13 +18,13 @@ namespace LibNetworks::Core
 
 std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> IOSocketAcceptor::Create(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession, const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount /*= 100*/)
 {
-    auto pListener = std::make_shared<IOSocketAcceptor>(rfListenerSocket, pOnDoFuncCreateSession);
-    if (!pListener->Start(listenPort, maxConnectionCount, threadCount, beginAcceptCount))
+    auto pAcceptor = std::make_shared<IOSocketAcceptor>(rfListenerSocket, pOnDoFuncCreateSession);
+    if (!pAcceptor->Start(listenPort, maxConnectionCount, threadCount, beginAcceptCount))
     {
         LibCommons::Logger::GetInstance().LogError("IOSocketAcceptor", "Create - Start failed. Port : {}", listenPort);
         return nullptr;
     }
-    return pListener;
+    return pAcceptor;
 
 }
 
@@ -35,7 +38,7 @@ IOSocketAcceptor::IOSocketAcceptor(Core::Socket& rfListenerSocket, OnDoFuncCreat
 void IOSocketAcceptor::Shutdown()
 {
     m_bExecuted = false;
-    m_pIOService->Stop();
+    if (m_pService) m_pService->Stop();
     m_ListenerSocket.Close();
 }
 
@@ -88,8 +91,18 @@ void IOSocketAcceptor::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
         // 3. Keep-Alive (30초 유휴 후 1초 간격)
         pSocket->UpdateContextKeepAlive(30000, 1000);
 
-        std::shared_ptr<Sessions::InboundSession> pInboundSession = m_pOnDoFuncCreateSession(pSocket);
-        m_pIOService->Associate(pAcceptOverlapped->AcceptSocket, pInboundSession->GetCompletionId());
+        std::shared_ptr<Sessions::INetworkSession> pInboundSession = m_pOnDoFuncCreateSession(pSocket);
+        
+        // IOCP 모드인 경우 (Service가 IOService인 경우)에만 Associate 수행
+        if (auto pIOService = std::dynamic_pointer_cast<LibNetworks::Services::IOService>(m_pService))
+        {
+            auto pIOConsumer = std::dynamic_pointer_cast<Core::IIOConsumer>(pInboundSession);
+            if (pIOConsumer)
+            {
+                pIOService->Associate(pAcceptOverlapped->AcceptSocket, pIOConsumer->GetCompletionId());
+            }
+        }
+        // RIO 모드인 경우 RIOSession 내부에서 소켓 처리가 이루어짐
 
         pInboundSession->OnAccepted();
     }
@@ -111,17 +124,30 @@ void IOSocketAcceptor::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
 bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
-    // 1. IOService 시작
-    if (!m_pIOService->Start(threadCount))
-    {
-        logger.LogError("IOSocketAcceptor", "IOService Start failed");
-        Shutdown();
 
-        return false;
+    // 1. Service 시작
+    if (m_pService)
+    {
+        if (!m_pService->Start(threadCount))
+        {
+            logger.LogError("IOSocketAcceptor", "Service Start failed");
+            Shutdown();
+            return false;
+        }
+    }
+    else
+    {
+        auto pIOService = std::make_shared<Services::IOService>();
+        if (!pIOService->Start(threadCount))
+        {
+            logger.LogError("IOSocketAcceptor", "Default IOService Start failed");
+            return false;
+        }
+        m_pService = pIOService;
     }
 
-    // 1. Listener를 위한 Socket 생성.
-    if (!ListenSocket(listenPort, maxConnectionCount))
+    // 2. Listener를 위한 Socket 생성.
+    if (!ListenSocket(m_ListenerSocketMode, listenPort, maxConnectionCount))
     {
         logger.LogError("IOSocketAcceptor", "ListenSocket is not valid.");
 
@@ -147,12 +173,25 @@ bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned lon
     return true;
 }
 
-bool IOSocketAcceptor::ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount)
+bool IOSocketAcceptor::ListenSocket(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, const unsigned short listenPort, const unsigned long maxConnectionCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
     // 1. 소켓 생성
-    m_ListenerSocket.CreateSocket();
+    switch(listenSocketMode)
+    {
+    case LibNetworks::Core::Socket::ENetworkMode::IOCP:
+        m_ListenerSocket.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::IOCP);
+        break;
+    case LibNetworks::Core::Socket::ENetworkMode::RIO:
+        m_ListenerSocket.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO);
+        break;
+    default:
+        logger.LogError("IOSocketAcceptor", "ListenSocket: Invalid listen socket mode : {}", static_cast<int>(listenSocketMode));
+        return false;
+    }
+    m_ListenerSocketMode = listenSocketMode;
+    
 
     // 2. 주소 설정 (모든 인터페이스)
     m_ListenerSocket.SetLocalAddress(listenPort);
@@ -171,13 +210,12 @@ bool IOSocketAcceptor::ListenSocket(const unsigned short listenPort, const unsig
         return false;
     }
 
-    // 4. IOCP에 소켓 연결
-    if (!m_pIOService->Associate(m_ListenerSocket.GetSocket(), GetCompletionId()))
+    // 4. IOCP에 소켓 연결 (Acceptor 자체는 항상 IOCP 필요)
+    auto pIOService = std::dynamic_pointer_cast<LibNetworks::Services::IOService>(m_pService);
+    if (!pIOService || !pIOService->Associate(m_ListenerSocket.GetSocket(), GetCompletionId()))
     {
-        logger.LogError("IOSocketAcceptor", "failed to associate listen socket.");
-
+        logger.LogError("IOSocketAcceptor", "failed to associate listen socket. (Requires IOService)");
         Shutdown();
-
         return false;
     }
 

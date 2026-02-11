@@ -6,18 +6,19 @@
   <Folder Name="/docs/">
     <File Path="docs/ARCHITECTURE_IOCP.md" />
     <File Path="docs/ARCHITECTURE_RIO.md" />
+    <File Path="docs/BENCHMARK_GUIDE.md" />
     <File Path="docs/BUILD_GUIDE.md" />
     <File Path="docs/CPP_MODERN_FEATURES.md" />
     <File Path="docs/MODULE_DEPENDENCIES.md" />
     <File Path="docs/PACKET_PROTOCOL.md" />
     <File Path="docs/PROJECT_STRUCTURE.md" />
     <File Path="docs/README_DOCS.md" />
+    <File Path="docs/RIO_FEATURES.md" />
   </Folder>
   <Folder Name="/docs/benchmark/">
     <File Path="docs/benchmark-results-01-baseline.md" />
     <File Path="docs/benchmark-results-02-scatter-gather.md" />
     <File Path="docs/benchmark-results-03-zero-copy-send.md" />
-    <File Path="docs/benchmark-results-04-socket-opt.md" />
   </Folder>
   <Folder Name="/솔루션 항목/">
     <File Path=".editorconfig" />

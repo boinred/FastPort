@@ -412,5 +412,6 @@ _Builds/
 
 Protocols/*.pb.*
 /FastPortBenchmark/loggers_benchmark
+loggers_*/
 GEMINI.md
 /nul

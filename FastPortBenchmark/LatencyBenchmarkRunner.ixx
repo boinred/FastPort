@@ -1,24 +1,23 @@
-﻿#pragma once
+﻿module;
 
-#include <memory>
-#include <thread>
-#include <atomic>
-#include <cstdint>
+#include <stdint.h>
 
-#include "BenchmarkStats.h"
-#include "BenchmarkRunner.h"
+export module benchmark.latency_runner;
 
-import networks.services.io_service;
+import std;
+import benchmark.stats;
+import benchmark.runner;
+import networks.services.inetwork_service;
 
 namespace FastPortBenchmark
 {
 
 // 패킷 ID 정의
-constexpr uint16_t PACKET_ID_BENCHMARK_REQUEST = 0x1001;
-constexpr uint16_t PACKET_ID_BENCHMARK_RESPONSE = 0x1002;
+export constexpr uint16_t PACKET_ID_BENCHMARK_REQUEST = 0x1001;
+export constexpr uint16_t PACKET_ID_BENCHMARK_RESPONSE = 0x1002;
 
 // 레이턴시 벤치마크 실행기
-class LatencyBenchmarkRunner : public IBenchmarkRunner
+export class LatencyBenchmarkRunner : public IBenchmarkRunner
 {
 public:
     LatencyBenchmarkRunner();
@@ -46,7 +45,7 @@ private:
 
     std::thread m_RunnerThread;
 
-    std::shared_ptr< LibNetworks::Services::IOService> m_IoService;
+    std::shared_ptr<LibNetworks::Services::INetworkService> m_Service;
 };
 
 

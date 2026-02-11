@@ -1,99 +1,105 @@
-﻿# 벤치마크 가이드
+# Benchmark Guide
 
-FastPort 네트워크 성능 벤치마크 도구 사용 가이드입니다.
+[English](BENCHMARK_GUIDE.md) | [한국어](ko/BENCHMARK_GUIDE.md)
 
----
-
-## 📊 개요
-
-`FastPortBenchmark`는 IOCP 기반 네트워크 서버의 성능을 측정하는 도구입니다.
-
-### 측정 지표
-
-| 지표 | 설명 | 단위 |
-|------|------|------|
-| **Latency (RTT)** | 요청-응답 왕복 시간 | µs, ms |
-| **Throughput** | 초당 처리 패킷/바이트 수 | packets/sec, MB/s |
-| **P50/P90/P95/P99** | 백분위 레이턴시 | µs |
-| **Std Dev** | 표준 편차 (Jitter) | µs |
+This guide explains how to use the FastPort network performance benchmark tool.
 
 ---
 
-## 🚀 사용법
+## 📊 Overview
 
-### 기본 실행
+`FastPortBenchmark` is a tool for measuring the performance of IOCP/RIO-based network servers.
+
+### Metrics
+
+| Metric | Description | Unit |
+|--------|-------------|------|
+| **Latency (RTT)** | Round-trip time for request-response | µs, ms |
+| **Throughput** | Packets/Bytes processed per second | packets/sec, MB/s |
+| **P50/P90/P95/P99** | Percentile Latency | µs |
+| **Std Dev** | Standard Deviation (Jitter) | µs |
+
+---
+
+## 🚀 Usage
+
+### Basic Execution
 
 ```powershell
-# 서버 먼저 실행
+# 1. Start the server first
 .\FastPortServer.exe
 
-# 벤치마크 실행 (별도 터미널)
+# 2. Run the benchmark (in a separate terminal)
 .\FastPortBenchmark.exe
 ```
 
-### 명령줄 옵션
+### Command Line Options
 
-| 옵션 | 설명 | 기본값 |
-|------|------|--------|
-| `--host <ip>` | 서버 주소 | 127.0.0.1 |
-| `--port <port>` | 서버 포트 | 9000 |
-| `--iterations <n>` | 반복 횟수 | 10000 |
-| `--warmup <n>` | 워밍업 횟수 | 100 |
-| `--payload <bytes>` | 페이로드 크기 | 64 |
-| `--output <file>` | CSV 결과 파일 | - |
-| `--verbose` | 상세 출력 | false |
-| `--help` | 도움말 | - |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--host <ip>` | Server address | 127.0.0.1 |
+| `--port <port>` | Server port | 9000 |
+| `--mode <mode>` | Network mode: `iocp` or `rio` | `iocp` |
+| `--iterations <n>` | Number of iterations | 10000 |
+| `--warmup <n>` | Number of warmup iterations | 100 |
+| `--payload <bytes>` | Payload size in bytes | 64 |
+| `--output <file>` | Output CSV file path | - |
+| `--verbose` | Enable verbose output | false |
+| `--help` | Show help message | - |
 
-### 예시
+### Examples
 
 ```powershell
-# 기본 테스트
+# Default test (IOCP mode)
 FastPortBenchmark.exe
 
-# 반복 횟수와 페이로드 크기 지정
+# RIO mode test (High Performance)
+FastPortBenchmark.exe --mode rio
+
+# Specify iterations and payload size
 FastPortBenchmark.exe --iterations 1000 --payload 256
 
-# 원격 서버 테스트 + CSV 저장
+# Remote server test + Save to CSV
 FastPortBenchmark.exe --host 192.168.1.100 --port 9001 --output results.csv
 
-# 상세 출력 모드
+# Verbose mode
 FastPortBenchmark.exe --iterations 100 --verbose
 ```
 
 ---
 
-## 📁 출력 파일
+## 📁 Output Files
 
-### CSV 파일명 형식
+### CSV Filename Format
 
-출력 파일명에는 자동으로 타임스탬프가 추가됩니다.
+Timestamps are automatically appended to output filenames.
 
 ```
 results.csv → results_2024-01-15-14-30.csv
 benchmark.csv → benchmark_2024-01-15-14-30.csv
 ```
 
-### CSV 컬럼
+### CSV Columns
 
-| 컬럼 | 설명 |
-|------|------|
-| `test_name` | 테스트 이름 |
-| `iterations` | 반복 횟수 |
-| `payload_size` | 페이로드 크기 (bytes) |
-| `avg_latency_ns` | 평균 레이턴시 (ns) |
-| `min_latency_ns` | 최소 레이턴시 (ns) |
-| `max_latency_ns` | 최대 레이턴시 (ns) |
-| `p50_latency_ns` | P50 레이턴시 (ns) |
-| `p90_latency_ns` | P90 레이턴시 (ns) |
-| `p95_latency_ns` | P95 레이턴시 (ns) |
-| `p99_latency_ns` | P99 레이턴시 (ns) |
-| `stddev_ns` | 표준 편차 (ns) |
-| `packets_per_sec` | 초당 패킷 수 |
-| `mb_per_sec` | 초당 MB |
+| Column | Description |
+|--------|-------------|
+| `test_name` | Name of the test |
+| `iterations` | Number of iterations |
+| `payload_size` | Payload size (bytes) |
+| `avg_latency_ns` | Average latency (ns) |
+| `min_latency_ns` | Minimum latency (ns) |
+| `max_latency_ns` | Maximum latency (ns) |
+| `p50_latency_ns` | 50th percentile latency (ns) |
+| `p90_latency_ns` | 90th percentile latency (ns) |
+| `p95_latency_ns` | 95th percentile latency (ns) |
+| `p99_latency_ns` | 99th percentile latency (ns) |
+| `stddev_ns` | Standard deviation (ns) |
+| `packets_per_sec` | Packets per second |
+| `mb_per_sec` | Megabytes per second |
 
 ---
 
-## 📋 출력 예시
+## 📋 Output Example
 
 ```
 ======================================
@@ -141,52 +147,52 @@ Results saved to: results_2024-01-15-14-30.csv
 
 ---
 
-## 📈 벤치마크 시나리오
+## 📈 Benchmark Scenarios
 
-### 1. 기본 레이턴시 테스트
+### 1. Basic Latency Test
 
 ```powershell
 FastPortBenchmark.exe --iterations 10000 --payload 64
 ```
 
-소규모 패킷의 기본 RTT 측정.
+Measures basic RTT for small packets.
 
-### 2. 대용량 패킷 테스트
+### 2. Large Packet Test
 
 ```powershell
 FastPortBenchmark.exe --iterations 1000 --payload 4096
 ```
 
-큰 패킷 처리 성능 측정.
+Measures performance for handling large packets.
 
-### 3. 장시간 안정성 테스트
+### 3. Long-Running Stability Test
 
 ```powershell
 FastPortBenchmark.exe --iterations 100000 --warmup 1000
 ```
 
-장시간 운영 시 성능 변화 측정.
+Measures performance changes over a long period.
 
-### 4. 비교 테스트 (최적화 전후)
+### 4. Comparison Test (IOCP vs RIO)
 
 ```powershell
-# 최적화 전
-FastPortBenchmark.exe --output before.csv
+# Measure IOCP
+FastPortBenchmark.exe --mode iocp --output iocp_result.csv
 
-# 코드 변경 후
-FastPortBenchmark.exe --output after.csv
+# Measure RIO
+FastPortBenchmark.exe --mode rio --output rio_result.csv
 
-# 결과 비교 (Excel 또는 스크립트)
+# Compare results (using Excel or scripts)
 ```
 
 ---
 
-## 🔧 프로토콜 명세
+## 🔧 Protocol Specification
 
-### 패킷 ID
+### Packet IDs
 
-| Packet ID | 메시지 | 방향 |
-|-----------|--------|------|
+| Packet ID | Message | Direction |
+|-----------|---------|-----------|
 | `0x1001` | BenchmarkRequest | Client → Server |
 | `0x1002` | BenchmarkResponse | Server → Client |
 
@@ -195,9 +201,9 @@ FastPortBenchmark.exe --output after.csv
 ```protobuf
 message BenchmarkRequest {
     Header header = 1;
-    uint64 client_timestamp_ns = 2;  // 클라이언트 전송 시점 (ns)
-    uint32 sequence = 3;              // 시퀀스 번호
-    bytes payload = 4;                // 가변 크기 페이로드
+    uint64 client_timestamp_ns = 2;  // Client send timestamp (ns)
+    uint32 sequence = 3;              // Sequence number
+    bytes payload = 4;                // Variable size payload
 }
 ```
 
@@ -207,63 +213,43 @@ message BenchmarkRequest {
 message BenchmarkResponse {
     Header header = 1;
     ResultCode result = 2;
-    uint64 client_timestamp_ns = 3;      // 클라이언트 원본 타임스탬프
-    uint64 server_recv_timestamp_ns = 4; // 서버 수신 시점
-    uint64 server_send_timestamp_ns = 5; // 서버 전송 시점
-    uint32 sequence = 6;                 // 시퀀스 번호
-    bytes payload = 7;                   // 페이로드 (Echo)
+    uint64 client_timestamp_ns = 3;      // Client original timestamp
+    uint64 server_recv_timestamp_ns = 4; // Server receive timestamp
+    uint64 server_send_timestamp_ns = 5; // Server send timestamp
+    uint32 sequence = 6;                 // Sequence number
+    bytes payload = 7;                   // Payload (Echo)
 }
 ```
 
 ---
 
-## ⚠️ 주의사항
+## ⚠️ Notes
 
-### 워밍업
+### Warmup
 
-- 초기 연결 및 JIT 최적화를 위해 워밍업 필요
-- 기본값 100회, 정밀 측정 시 1000회 이상 권장
+- Warmup is required for initial connection setup and JIT optimization.
+- Default is 100; 1000+ recommended for precise measurement.
 
-### 네트워크 환경
+### Network Environment
 
-- localhost 테스트 시 네트워크 지연 최소화
-- 원격 테스트 시 네트워크 대역폭/지연 고려
+- Use localhost to minimize network delay for pure code performance testing.
+- Consider network bandwidth/latency for remote tests.
 
-### 시스템 부하
+### System Load
 
-- 다른 프로세스의 CPU/네트워크 사용량 최소화
-- 여러 번 측정 후 평균값 사용 권장
+- Minimize CPU/network usage of other processes.
+- Recommended to average results from multiple runs.
 
-### 결과 해석
+### Interpreting Results
 
-- P99 레이턴시가 평균보다 훨씬 높다면 tail latency 이슈
-- Std Dev가 높다면 성능 불안정
-
----
-
-## 📊 결과 분석 팁
-
-### Excel에서 분석
-
-1. CSV 파일 열기
-2. 피벗 테이블로 테스트 간 비교
-3. 차트로 레이턴시 분포 시각화
-
-### 최적화 효과 측정
-
-```
-개선율 = (이전 - 이후) / 이전 × 100%
-
-예: P99 레이턴시
-    이전: 520.40 µs
-    이후: 380.20 µs
-    개선율: (520.40 - 380.20) / 520.40 × 100% = 26.9% 개선
-```
+- If P99 latency is significantly higher than average, check for tail latency issues.
+- High Std Dev indicates unstable performance.
 
 ---
 
-## 🔗 관련 문서
+## 🔗 Related Documents
 
-- [IOCP 아키텍처](IOCP_ARCHITECTURE.md)
-- [패킷 프로토콜](PACKET_PROTOCOL.md)
-- [빌드 가이드](BUILD_GUIDE.md)
+- [IOCP Architecture](ARCHITECTURE_IOCP.md)
+- [RIO Architecture](ARCHITECTURE_RIO.md)
+- [Packet Protocol](PACKET_PROTOCOL.md)
+- [Build Guide](BUILD_GUIDE.md)

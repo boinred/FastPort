@@ -63,5 +63,33 @@
     <ClCompile Include="Packet.ixx">
       <Filter>Core</Filter>
     </ClCompile>
+    <ClCompile Include="RioBufferManager.cpp" />
+    <ClCompile Include="RioBufferManager.ixx" />
+    <ClCompile Include="RioExtension.cpp" />
+    <ClCompile Include="RioExtension.ixx" />
+    <ClCompile Include="RIOSession.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="RIOSession.cpp">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="INetworkService.ixx">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="INetworkSession.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="RioContext.ixx">
+      <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="RIOService.ixx">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="RIOService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="RioConsumer.ixx">
+      <Filter>Services</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

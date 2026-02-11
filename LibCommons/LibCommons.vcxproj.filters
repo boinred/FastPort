@@ -18,6 +18,9 @@
     </ClCompile>
     <ClCompile Include="Container.ixx" />
     <ClCompile Include="EventListener.ixx" />
+    <ClCompile Include="ExternalCircleBufferQueue.ixx">
+      <Filter>Buffers</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Buffers">

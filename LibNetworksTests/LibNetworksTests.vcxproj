@@ -159,6 +159,11 @@
   <ItemGroup>
     <ClCompile Include="LibNetworksTests.cpp" />
     <ClCompile Include="PacketFramerTests.cpp" />
+    <ClCompile Include="RioBufferManagerTests.cpp" />
+    <ClCompile Include="RioBufferAdapterTests.cpp" />
+    <ClCompile Include="RioFoundationTests.cpp" />
+    <ClCompile Include="RioServiceTests.cpp" />
+    <ClCompile Include="RioSessionTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">
@@ -166,6 +171,9 @@
     </ProjectReference>
     <ProjectReference Include="..\LibNetworks\LibNetworks.vcxproj">
       <Project>{82bd6e86-a438-4a32-847c-229e1d77ffa8}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Protocols\Protocols.vcxproj">
+      <Project>{17dbf54e-3460-402c-a2b0-75ff9cbabcbd}</Project>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

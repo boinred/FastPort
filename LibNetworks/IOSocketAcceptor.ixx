@@ -10,9 +10,8 @@ export module networks.core.io_socket_acceptor;
 import networks.core.io_consumer;
 import networks.core.socket;
 
-import networks.sessions.inbound_session;
-
-import networks.services.io_service;
+import networks.sessions.inetwork_session;
+import networks.services.inetwork_service;
 
 namespace LibNetworks::Core
 {
@@ -27,7 +26,7 @@ export class IOSocketAcceptor : public Core::IIOConsumer, std::enable_shared_fro
     };
 public:
 
-    using OnDoFuncCreateSession = std::function<std::shared_ptr<Sessions::InboundSession>(const std::shared_ptr<Core::Socket>&)>;
+    using OnDoFuncCreateSession = std::function<std::shared_ptr<Sessions::INetworkSession>(const std::shared_ptr<Core::Socket>&)>;
 
     static std::shared_ptr<IOSocketAcceptor> Create(Core::Socket& rfListenerSocket,
         OnDoFuncCreateSession pOnDoFuncCreateSession,
@@ -47,12 +46,15 @@ protected:
 private:
     bool Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount);
 
-    bool ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount);
+    bool ListenSocket(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, const unsigned short listenPort, const unsigned long maxConnectionCount);
     bool BeginAcceptEx();
 
 private:
+
+    LibNetworks::Core::Socket::ENetworkMode m_ListenerSocketMode = LibNetworks::Core::Socket::ENetworkMode::IOCP;
+
     Core::Socket m_ListenerSocket = {};
-    std::shared_ptr<Services::IOService> m_pIOService = std::make_shared<Services::IOService>();
+    std::shared_ptr<Services::INetworkService> m_pService = {};
 
     bool m_bExecuted = {};
 

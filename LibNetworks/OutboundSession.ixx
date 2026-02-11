@@ -35,6 +35,8 @@ public:
         return const_cast<OVERLAPPED&>(rfThis.GetConnectOverlapped());
     }
 
+    virtual OVERLAPPED* GetConnectOverlappedPtr() override { return &m_ConnectOverlapped; }
+
 protected:
     void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
 

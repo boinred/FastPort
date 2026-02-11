@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <Windows.h>
 #include <memory>
@@ -11,6 +11,8 @@ import commons.strconverter;
 
 namespace LibCommons
 {
+
+
 
 export class ServiceMode : public std::enable_shared_from_this<ServiceMode>
 {
@@ -33,7 +35,7 @@ public:
 
     static bool Run(std::shared_ptr<ServiceMode> pService);
 
-    void Wait();
+    void Wait() const;
 
     std::string FileVersion() const { return m_FileVersion; }
     void FileVersion(std::string val) { m_FileVersion = val; }

@@ -17,4 +17,4 @@ public:
 	}
 };
 
-} // export namespace LibNetworks::Services
+} // namespace LibNetworks::Core

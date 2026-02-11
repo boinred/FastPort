@@ -6,19 +6,22 @@
 
 export module networks.services.io_service;
 
+import networks.services.inetwork_service;
+import std;
+
 namespace LibNetworks::Services
 {
-export class IOService
+export class IOService : public INetworkService
 {
 public:
     IOService();
-    ~IOService();
+    virtual ~IOService() override;
 
     IOService(const IOService&) = delete;
 
-    bool Start(unsigned int numThreads);
+    virtual bool Start(uint32_t threadCount) override;
 
-    void Stop();
+    virtual void Stop() override;
 
     void Wait();
 

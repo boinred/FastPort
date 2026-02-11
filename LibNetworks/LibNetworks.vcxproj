@@ -21,7 +21,11 @@
   <ItemGroup>
     <ClCompile Include="InboundSession.cpp" />
     <ClCompile Include="InboundSession.ixx" />
+    <ClCompile Include="INetworkService.ixx" />
+    <ClCompile Include="INetworkSession.ixx" />
     <ClCompile Include="IOConsumer.ixx" />
+    <ClCompile Include="RIOSession.cpp" />
+    <ClCompile Include="RIOSession.ixx" />
     <ClCompile Include="IOService.cpp" />
     <ClCompile Include="IOService.ixx" />
     <ClCompile Include="IOSession.cpp" />
@@ -34,6 +38,14 @@
     <ClCompile Include="OutboundSession.ixx" />
     <ClCompile Include="Packet.ixx" />
     <ClCompile Include="PacketFramer.ixx" />
+    <ClCompile Include="RioBufferManager.cpp" />
+    <ClCompile Include="RioBufferManager.ixx" />
+    <ClCompile Include="RioContext.ixx" />
+    <ClCompile Include="RioConsumer.ixx" />
+    <ClCompile Include="RIOService.cpp" />
+    <ClCompile Include="RIOService.ixx" />
+    <ClCompile Include="RioExtension.cpp" />
+    <ClCompile Include="RioExtension.ixx" />
     <ClCompile Include="Socket.cpp" />
     <ClCompile Include="Socket.ixx" />
   </ItemGroup>

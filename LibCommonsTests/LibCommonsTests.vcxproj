@@ -158,6 +158,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CircleBufferQueueTests.cpp" />
+    <ClCompile Include="LockBenchmarkTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">
