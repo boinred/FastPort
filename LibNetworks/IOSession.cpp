@@ -279,7 +279,7 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         if (!bSuccess)
         {
             m_RecvInProgress.store(false);
-            LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
+            LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
             RequestDisconnect();
             return;
         }

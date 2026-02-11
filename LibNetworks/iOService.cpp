@@ -60,7 +60,7 @@ bool IOService::Start(uint32_t threadCount)
 
                     if (ERROR_NETNAME_DELETED == dwError || ERROR_CONNECTION_ABORTED == dwError)
                     {
-                        logger.LogError("IOService", "Worker thread, Connection closed. Error: {}", dwError);
+                        logger.LogInfo("IOService", "Worker thread, Connection closed. Error: {}", dwError);
 
                         auto pConsumer = reinterpret_cast<Core::IIOConsumer*>(completionId);
                         if (pConsumer)

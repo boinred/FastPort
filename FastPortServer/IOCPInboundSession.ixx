@@ -1,21 +1,21 @@
-﻿module;
+module;
 
-export module fastport_inbound_session;
+export module iocp_inbound_session;
 import networks.sessions.inbound_session;
 import commons.buffers.ibuffer;
 import networks.core.packet;
 
-export class FastPortInboundSession : public LibNetworks::Sessions::InboundSession
+export class IOCPInboundSession : public LibNetworks::Sessions::InboundSession
 {
 public:
-    FastPortInboundSession() = delete;
-    FastPortInboundSession(const FastPortInboundSession&) = delete;
-    FastPortInboundSession& operator=(const FastPortInboundSession&) = delete;
+    IOCPInboundSession() = delete;
+    IOCPInboundSession(const IOCPInboundSession&) = delete;
+    IOCPInboundSession& operator=(const IOCPInboundSession&) = delete;
 
-    explicit FastPortInboundSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
+    explicit IOCPInboundSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
         std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
         std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
-    virtual ~FastPortInboundSession() override; 
+    virtual ~IOCPInboundSession() override; 
 
     void OnAccepted() override;
 

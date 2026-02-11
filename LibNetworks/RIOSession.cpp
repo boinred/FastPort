@@ -20,7 +20,7 @@ namespace LibNetworks::Sessions
 RIOSession::RIOSession(const std::shared_ptr<Core::Socket>& pSocket, const Core::RioBufferSlice& recvSlice, const Core::RioBufferSlice& sendSlice, RIO_CQ completionQueue)
     : m_pSocket(pSocket), m_RecvSlice(recvSlice), m_SendSlice(sendSlice)
 {
-    m_RQ = Core::RioExtension::GetTable().RIOCreateRequestQueue(pSocket->GetSocket(), 1, 1, 1, 1,completionQueue, completionQueue, this);
+    m_RQ = Core::RioExtension::GetTable().RIOCreateRequestQueue(pSocket->GetSocket(), 1, 1, 1, 1, completionQueue, completionQueue, this);
     if (m_RQ == RIO_INVALID_RQ)
     {
         LibCommons::Logger::GetInstance().LogError("RIOSession", "RIOSession::Constructor - RIOCreateRequestQueue failed. Socket : {}, Error : {}", pSocket->GetSocket(), WSAGetLastError());
@@ -113,12 +113,12 @@ void RIOSession::SendMessage(const uint16_t packetId, const google::protobuf::Me
             {
                 // 바로 쓰기 (할당/복사 비용 절감)
                 size_t written = 0;
-                
+
                 // Helper lambda to write data to spans
                 auto writeToSpans = [&](const void* data, size_t len) {
                     const uint8_t* pSrc = static_cast<const uint8_t*>(data);
                     size_t remaining = len;
-                    
+
                     for (auto& span : writableBuffers)
                     {
                         if (remaining == 0) break;
@@ -128,13 +128,13 @@ void RIOSession::SendMessage(const uint16_t packetId, const google::protobuf::Me
                             written -= span.size(); // 다음 span을 위해 로컬 written 조정은 복잡함.
                             // 재계산 방식 대신, 전체 버퍼를 순회하며 쓰는 기존 방식 사용 권장.
                             // 하지만 여기서는 간단히 구현.
-                            continue; 
+                            continue;
                         }
                         // 위 방식은 복잡하므로, m_pSendBuffer->Write()를 직접 사용하는게 나을 수 있으나
                         // IBuffer 인터페이스 제약상 Span을 받아야 함.
                         // 여기서는 로직 단순화를 위해 임시 버퍼 없이 직접 복사 로직을 구현.
                     }
-                };
+                    };
 
                 // Fast-Path 구현이 복잡해질 수 있으므로, 
                 // "공간이 충분하면" -> "직렬화 후 바로 Commit" 전략 사용.
@@ -185,7 +185,7 @@ void RIOSession::SendMessage(const uint16_t packetId, const google::protobuf::Me
             m_PendingTotalBytes += totalSize;
         }
     }
-    
+
     // 큐에 데이터가 있거나 방금 넣었으면 Flush 시도
     FlushPendingSendQueue();
 }
@@ -214,10 +214,10 @@ void RIOSession::FlushPendingSendQueue()
         for (auto& span : writableBuffers)
         {
             if (remainingCopy == 0) break;
-            
+
             size_t copySize = (std::min)(remainingCopy, span.size());
             std::memcpy(span.data(), pSrc, copySize);
-            
+
             pSrc += copySize;
             remainingCopy -= copySize;
             written += copySize;
@@ -225,10 +225,10 @@ void RIOSession::FlushPendingSendQueue()
 
         m_pSendBuffer->CommitWrite(written);
         pending.Offset += written;
-        
+
         if (pending.Offset >= pending.Data.size())
         {
-            m_PendingTotalBytes -= pending.Data.size(); 
+            m_PendingTotalBytes -= pending.Data.size();
             m_PendingSendQueue.pop_front();
         }
         else

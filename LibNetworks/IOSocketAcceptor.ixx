@@ -28,7 +28,9 @@ public:
 
     using OnDoFuncCreateSession = std::function<std::shared_ptr<Sessions::INetworkSession>(const std::shared_ptr<Core::Socket>&)>;
 
-    static std::shared_ptr<IOSocketAcceptor> Create(Core::Socket& rfListenerSocket,
+    static std::shared_ptr<IOSocketAcceptor> Create(
+        LibNetworks::Core::Socket::ENetworkMode listenSocketMode,
+        Core::Socket& rfListenerSocket,
         OnDoFuncCreateSession pOnDoFuncCreateSession,
         const unsigned short listenPort,
         const unsigned long maxConnectionCount,
@@ -37,7 +39,7 @@ public:
 
     IOSocketAcceptor() = delete;
 
-    explicit IOSocketAcceptor(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession);
+    explicit IOSocketAcceptor(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession);
 
     void Shutdown();
 
@@ -46,12 +48,12 @@ protected:
 private:
     bool Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount);
 
-    bool ListenSocket(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, const unsigned short listenPort, const unsigned long maxConnectionCount);
+    bool ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount);
     bool BeginAcceptEx();
 
 private:
 
-    LibNetworks::Core::Socket::ENetworkMode m_ListenerSocketMode = LibNetworks::Core::Socket::ENetworkMode::IOCP;
+    const LibNetworks::Core::Socket::ENetworkMode m_ListenerSocketMode = LibNetworks::Core::Socket::ENetworkMode::IOCP;
 
     Core::Socket m_ListenerSocket = {};
     std::shared_ptr<Services::INetworkService> m_pService = {};

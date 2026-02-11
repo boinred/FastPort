@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include <utility>
 #include <spdlog/spdlog.h>
@@ -9,7 +9,7 @@
 #include <Protocols/Benchmark.pb.h>
 
 
-module fastport_inbound_session;
+module iocp_inbound_session;
 import commons.logger;
 import commons.container; 
 import commons.singleton;
@@ -31,7 +31,7 @@ namespace
     }
 }
 
-FastPortInboundSession::FastPortInboundSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
+IOCPInboundSession::IOCPInboundSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer)
     : LibNetworks::Sessions::InboundSession(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer))
@@ -39,21 +39,21 @@ FastPortInboundSession::FastPortInboundSession(const std::shared_ptr<LibNetworks
 
 }
 
-FastPortInboundSession::~FastPortInboundSession()
+IOCPInboundSession::~IOCPInboundSession()
 {
-    LibCommons::Logger::GetInstance().LogInfo("FastPortInboundSession", "Destructor called. Session Id : {}", GetSessionId());
+    LibCommons::Logger::GetInstance().LogInfo("IOCPInboundSession", "Destructor called. Session Id : {}", GetSessionId());
 }
 
-void FastPortInboundSession::OnAccepted()
+void IOCPInboundSession::OnAccepted()
 {
     __super::OnAccepted();
 
 
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
-    sessions.Add(GetSessionId(), std::dynamic_pointer_cast<FastPortInboundSession>(shared_from_this()));
+    sessions.Add(GetSessionId(), std::dynamic_pointer_cast<IOCPInboundSession>(shared_from_this()));
 }
 
-void FastPortInboundSession::OnDisconnected()
+void IOCPInboundSession::OnDisconnected()
 {
     __super::OnDisconnected();
 
@@ -61,7 +61,7 @@ void FastPortInboundSession::OnDisconnected()
     sessions.Remove(GetSessionId());
 }
 
-void FastPortInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPacket)
+void IOCPInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPacket)
 {
     __super::OnPacketReceived(rfPacket);
 
@@ -77,19 +77,19 @@ void FastPortInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& r
         HandleEchoRequest(rfPacket);
         break;
     default:
-        LibCommons::Logger::GetInstance().LogWarning("FastPortInboundSession", "OnPacketReceived, Unknown packet id : {}. Session Id : {}", packetId, GetSessionId());
+        LibCommons::Logger::GetInstance().LogWarning("IOCPInboundSession", "OnPacketReceived, Unknown packet id : {}. Session Id : {}", packetId, GetSessionId());
         break;
     }
 }
 
-void FastPortInboundSession::HandleBenchmarkRequest(const LibNetworks::Core::Packet& rfPacket)
+void IOCPInboundSession::HandleBenchmarkRequest(const LibNetworks::Core::Packet& rfPacket)
 {
     uint64_t recvTimestamp = GetCurrentTimeNs();
 
     ::fastport::protocols::benchmark::BenchmarkRequest request;
     if (!rfPacket.ParseMessage(request))
     {
-        LibCommons::Logger::GetInstance().LogError("FastPortInboundSession", 
+        LibCommons::Logger::GetInstance().LogError("IOCPInboundSession", 
             "HandleBenchmarkRequest, Failed to parse. Session Id : {}", GetSessionId());
         return;
     }
@@ -110,17 +110,17 @@ void FastPortInboundSession::HandleBenchmarkRequest(const LibNetworks::Core::Pac
     SendMessage(PACKET_ID_BENCHMARK_RESPONSE, response);
 }
 
-void FastPortInboundSession::HandleEchoRequest(const LibNetworks::Core::Packet& rfPacket)
+void IOCPInboundSession::HandleEchoRequest(const LibNetworks::Core::Packet& rfPacket)
 {
     const auto packetId = rfPacket.GetPacketId();
 
-    LibCommons::Logger::GetInstance().LogInfo("FastPortInboundSession", 
+    LibCommons::Logger::GetInstance().LogInfo("IOCPInboundSession", 
         "HandleEchoRequest. Session Id : {}, Data Length : {}", GetSessionId(), rfPacket.GetPacketSize());
 
     ::fastport::protocols::tests::EchoRequest request;
     if (!rfPacket.ParseMessage(request))
     {
-        LibCommons::Logger::GetInstance().LogError("FastPortInboundSession", 
+        LibCommons::Logger::GetInstance().LogError("IOCPInboundSession", 
             "HandleEchoRequest, Failed to parse. Session Id : {}, Packet Id : {}", GetSessionId(), packetId);
         return;
     }
@@ -134,12 +134,12 @@ void FastPortInboundSession::HandleEchoRequest(const LibNetworks::Core::Packet& 
     
     SendMessage(packetId, response);
 
-    LibCommons::Logger::GetInstance().LogInfo("FastPortInboundSession", 
+    LibCommons::Logger::GetInstance().LogInfo("IOCPInboundSession", 
         "HandleEchoRequest, Response sent. Session Id : {}, Packet Id: {}, Request Id : {}", 
         GetSessionId(), packetId, request.header().request_id());
 }
 
-void FastPortInboundSession::OnSent(size_t bytesSent)
+void IOCPInboundSession::OnSent(size_t bytesSent)
 {
     __super::OnSent(bytesSent);
 }

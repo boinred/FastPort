@@ -2,11 +2,37 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="FastPortServer.cpp" />
-    <ClCompile Include="FastPortInboundSession.cpp" />
-    <ClCompile Include="FastPortInboundSession.ixx" />
-    <ClCompile Include="FastPortServiceMode.ixx" />
-    <ClCompile Include="FastPortServiceMode.cpp" />
-    <ClCompile Include="RIOInboundSession.ixx" />
-    <ClCompile Include="RIOInboundSession.cpp" />
+    <ClCompile Include="IOCPServiceMode.cpp">
+      <Filter>IOCP</Filter>
+    </ClCompile>
+    <ClCompile Include="IOCPServiceMode.ixx">
+      <Filter>IOCP</Filter>
+    </ClCompile>
+    <ClCompile Include="RIOServiceMode.cpp">
+      <Filter>RIO</Filter>
+    </ClCompile>
+    <ClCompile Include="RIOServiceMode.ixx">
+      <Filter>RIO</Filter>
+    </ClCompile>
+    <ClCompile Include="IOCPInboundSession.cpp">
+      <Filter>IOCP</Filter>
+    </ClCompile>
+    <ClCompile Include="IOCPInboundSession.ixx">
+      <Filter>IOCP</Filter>
+    </ClCompile>
+    <ClCompile Include="RIOInboundSession.cpp">
+      <Filter>RIO</Filter>
+    </ClCompile>
+    <ClCompile Include="RIOInboundSession.ixx">
+      <Filter>RIO</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="IOCP">
+      <UniqueIdentifier>{fed51838-67d1-4f87-bcf1-3e20d03d6211}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="RIO">
+      <UniqueIdentifier>{f70100d5-7a75-4338-bf9c-8040cc4b25ff}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

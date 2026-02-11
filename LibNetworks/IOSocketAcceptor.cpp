@@ -16,9 +16,16 @@ namespace LibNetworks::Core
 {
 
 
-std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> IOSocketAcceptor::Create(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession, const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount /*= 100*/)
+std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> IOSocketAcceptor::Create(
+    LibNetworks::Core::Socket::ENetworkMode listenSocketMode,
+    Core::Socket& rfListenerSocket,
+    OnDoFuncCreateSession pOnDoFuncCreateSession,
+    const unsigned short listenPort,
+    const unsigned long maxConnectionCount,
+    const unsigned char threadCount,
+    const unsigned char beginAcceptCount /*= 100*/)
 {
-    auto pAcceptor = std::make_shared<IOSocketAcceptor>(rfListenerSocket, pOnDoFuncCreateSession);
+    auto pAcceptor = std::make_shared<IOSocketAcceptor>(listenSocketMode, rfListenerSocket, pOnDoFuncCreateSession);
     if (!pAcceptor->Start(listenPort, maxConnectionCount, threadCount, beginAcceptCount))
     {
         LibCommons::Logger::GetInstance().LogError("IOSocketAcceptor", "Create - Start failed. Port : {}", listenPort);
@@ -29,8 +36,8 @@ std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> IOSocketAcceptor::Create(Co
 }
 
 
-IOSocketAcceptor::IOSocketAcceptor(Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession)
-    : m_ListenerSocket(std::move(rfListenerSocket)), m_pOnDoFuncCreateSession(pOnDoFuncCreateSession)
+IOSocketAcceptor::IOSocketAcceptor(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, Core::Socket& rfListenerSocket, OnDoFuncCreateSession pOnDoFuncCreateSession)
+    : m_ListenerSocketMode(listenSocketMode), m_ListenerSocket(std::move(rfListenerSocket)), m_pOnDoFuncCreateSession(pOnDoFuncCreateSession)
 {
 
 }
@@ -38,7 +45,10 @@ IOSocketAcceptor::IOSocketAcceptor(Core::Socket& rfListenerSocket, OnDoFuncCreat
 void IOSocketAcceptor::Shutdown()
 {
     m_bExecuted = false;
-    if (m_pService) m_pService->Stop();
+    if (m_pService)
+    {
+        m_pService->Stop();
+    }
     m_ListenerSocket.Close();
 }
 
@@ -92,7 +102,7 @@ void IOSocketAcceptor::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
         pSocket->UpdateContextKeepAlive(30000, 1000);
 
         std::shared_ptr<Sessions::INetworkSession> pInboundSession = m_pOnDoFuncCreateSession(pSocket);
-        
+
         // IOCP 모드인 경우 (Service가 IOService인 경우)에만 Associate 수행
         if (auto pIOService = std::dynamic_pointer_cast<LibNetworks::Services::IOService>(m_pService))
         {
@@ -147,7 +157,7 @@ bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned lon
     }
 
     // 2. Listener를 위한 Socket 생성.
-    if (!ListenSocket(m_ListenerSocketMode, listenPort, maxConnectionCount))
+    if (!ListenSocket(listenPort, maxConnectionCount))
     {
         logger.LogError("IOSocketAcceptor", "ListenSocket is not valid.");
 
@@ -173,12 +183,12 @@ bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned lon
     return true;
 }
 
-bool IOSocketAcceptor::ListenSocket(LibNetworks::Core::Socket::ENetworkMode listenSocketMode, const unsigned short listenPort, const unsigned long maxConnectionCount)
+bool IOSocketAcceptor::ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
     // 1. 소켓 생성
-    switch(listenSocketMode)
+    switch (m_ListenerSocketMode)
     {
     case LibNetworks::Core::Socket::ENetworkMode::IOCP:
         m_ListenerSocket.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::IOCP);
@@ -187,11 +197,10 @@ bool IOSocketAcceptor::ListenSocket(LibNetworks::Core::Socket::ENetworkMode list
         m_ListenerSocket.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO);
         break;
     default:
-        logger.LogError("IOSocketAcceptor", "ListenSocket: Invalid listen socket mode : {}", static_cast<int>(listenSocketMode));
+        logger.LogError("IOSocketAcceptor", "ListenSocket: Invalid listen socket mode : {}", static_cast<int>(m_ListenerSocketMode));
         return false;
     }
-    m_ListenerSocketMode = listenSocketMode;
-    
+
 
     // 2. 주소 설정 (모든 인터페이스)
     m_ListenerSocket.SetLocalAddress(listenPort);
@@ -266,7 +275,13 @@ bool IOSocketAcceptor::BeginAcceptEx()
     AcceptOverlapped* pAcceptOverlapped = new AcceptOverlapped();
 
     // 2. 클라이언트용 소켓 생성
-    pAcceptOverlapped->AcceptSocket = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, WSA_FLAG_OVERLAPPED);
+    DWORD dwFlags = WSA_FLAG_OVERLAPPED;
+    if (m_ListenerSocketMode == LibNetworks::Core::Socket::ENetworkMode::RIO)
+    {
+        dwFlags |= WSA_FLAG_REGISTERED_IO;
+    }
+
+    pAcceptOverlapped->AcceptSocket = ::WSASocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, nullptr, 0, dwFlags);
     if (INVALID_SOCKET == pAcceptOverlapped->AcceptSocket)
     {
         logger.LogError("IOSocketAcceptor", "BeginAcceptEx: Failed to create accept socket. Error : {}", ::WSAGetLastError());

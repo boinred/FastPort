@@ -2,6 +2,8 @@
 
 > FastPort RIO(Registered I/O) 구현의 단계별 개선 체크리스트.
 > 각 단계는 독립적으로 완료 가능하며, 우선순위 순으로 정렬되어 있다.
+>
+> 마지막 업데이트: 2025-02-11 (commit `301cc55` 기준)
 
 ---
 
@@ -17,10 +19,11 @@ RIO가 정상 동작하기 위한 필수 수정 사항.
 - [ ] `RIONotify()` 호출로 CQ 알림 활성화 (배치 디큐 후 재등록)
 - [ ] `std::this_thread::yield()` 스핀 루프 제거
 
-> **현재 문제**: `RIOCreateCompletionQueue()`에 `nullptr` 전달 중.
+> **현재 문제**: `RIOCreateCompletionQueue()`에 `nullptr` 전달 중 (`RIOService.cpp` line 30).
 > IOCP에 연결되지 않아 완료 통지가 전달되지 않고, yield 기반 폴링으로 CPU를 낭비한다.
 >
 > **목표**: `RIONotify()`만 유일한 커널 전환이 되도록 하여, 배치 디큐의 성능 이점을 살린다.
+> Accept용 IOCP 워커 풀을 재사용하여 별도 폴링 스레드를 제거할 수 있다.
 
 ### 1.2 CQ 디큐 스레드 안전성 보장
 
@@ -29,7 +32,8 @@ RIO가 정상 동작하기 위한 필수 수정 사항.
 - [ ] 방안 B: 여러 CQ 생성 후 스레드별 분배
 - [ ] 방안 C: CQ 디큐에 뮤텍스 적용 (성능 트레이드오프 있음)
 
-> **현재 문제**: `Start(threadCount)`로 다수의 워커 스레드가 같은 CQ에서 `RIODequeueCompletion()`을 동시 호출.
+> **현재 문제**: `RIOService::Start(threadCount)`로 다수의 워커 스레드가 같은 CQ에서
+> `RIODequeueCompletion()`을 동시 호출 (`RIOService.cpp` lines 77-102).
 > 데이터 손상 및 미정의 동작 발생 가능.
 
 ### 1.3 RioBufferManager 슬라이스 해제/재사용
@@ -40,7 +44,7 @@ RIO가 정상 동작하기 위한 필수 수정 사항.
 - [ ] 풀 사용량 모니터링: `GetAllocatedCount()`, `GetFreeCount()` 추가
 - [ ] 풀 소진 시 경고 로그 출력
 
-> **현재 문제**: `AllocateSlice()`는 단순 오프셋 증가(pointer bump) 방식.
+> **현재 문제**: `AllocateSlice()`는 단순 오프셋 증가(pointer bump) 방식 (`RioBufferManager.cpp` line 63).
 > 세션이 종료되어도 버퍼가 반환되지 않아, 장기 운영 시 풀이 고갈된다.
 > 64MB 풀 기준 Recv+Send(16KB×2) → 최대 2,048 세션 후 할당 불가.
 
@@ -54,43 +58,60 @@ IOCP의 IOSession과 동등한 기능을 갖추기 위한 세션 계층 보완.
 
 - [ ] `RequestDisconnect()` 메서드 구현
 - [ ] 소켓 shutdown (`SD_BOTH`) 및 `closesocket()` 호출
-- [ ] `RIOCloseCompletionQueue()` 또는 RQ 정리 (`m_RQ` 해제)
+- [ ] RQ 핸들 정리 (`m_RQ` 닫기)
 - [ ] 버퍼 초기화 (`m_pReceiveBuffer->Clear()`, `m_pSendBuffer->Clear()`)
 - [ ] `m_bIsDisconnected` 플래그 설정 후 추가 I/O 차단
 - [ ] `OnDisconnected()` 콜백 호출
-- [ ] 버퍼 슬라이스 `RioBufferManager`로 반환
+- [ ] 버퍼 슬라이스 `RioBufferManager`로 반환 (Phase 1.3 완료 후)
 
-> **현재 문제**: `m_bIsDisconnected = true`만 설정하고 소켓, RQ, 버퍼 정리가 없다.
-> IOSession은 `RequestDisconnect()`에서 소켓 shutdown, 버퍼 clear, 에러 로깅을 모두 수행한다.
+> **현재 문제**: `m_bIsDisconnected = true`만 설정하고 소켓, RQ, 버퍼 정리가 없다
+> (`RIOSession.cpp` line 157). IOSession은 `RequestDisconnect()`에서 소켓 shutdown,
+> 버퍼 clear, 에러 로깅을 모두 수행한다.
 
 ### 2.2 Send 파이프라인 안정화
 
+- [x] 백프레셔 큐 구현 (`m_PendingSendQueue` + `m_PendingTotalBytes`, 10MB 상한)
+- [x] `FlushPendingSendQueue()` 구현: 대기 큐 → 버퍼 순차 전송
 - [ ] `TryPostSendFromQueue()` 다중 청크(circular buffer wrap-around) 지원
 - [ ] Scatter-Gather I/O: 링 버퍼가 2개 구간으로 분할되는 경우 처리
 - [ ] Send 실패 시 재시도 로직 추가
 - [ ] Send 완료 후 `OnSent(size_t bytesSent)` 콜백 호출
-- [ ] Send 큐 백프레셔: 버퍼 가득 찬 경우 호출자에게 알림
+- [ ] 백프레셔 초과 시 세션 연결 해제 (현재 로그만 출력, 주석 처리됨)
 
-> **현재 문제**: `TryPostSendFromQueue()`가 첫 번째 버퍼 청크만 전송.
-> 원형 버퍼가 끝에서 시작으로 감싸는(wrap) 경우, 뒷부분 데이터가 누락된다.
+> **현재 문제**: `TryPostSendFromQueue()`가 `readBuffers[0]`만 전송 (`RIOSession.cpp` line 281-292).
+> 원형 버퍼가 끝에서 시작으로 감싸는(wrap) 경우, 두 번째 청크 데이터가 누락된다.
+>
+> **완료된 부분**: `PendingSendQueue`와 `FlushPendingSendQueue()`로 대형 패킷 전송 흐름은 구현됨.
+> Send 완료 시 큐를 다시 플러시하는 재시도 체인도 동작한다.
 
 ### 2.3 Recv 에러 복구
 
 - [ ] `RIOReceive()` 실패 시 재시도 로직 추가
 - [ ] 수신 0바이트 → 정상 종료(graceful disconnect) 처리
-- [ ] 수신 에러 → 강제 종료(abortive disconnect) 처리
+- [ ] 수신 에러(`bSuccess == false`) → 강제 종료(abortive disconnect) 처리
 - [ ] 패킷 프레이밍 오류 시 세션 정리
 
-> **현재 문제**: `RIOReceive()` 실패 시 아무 조치 없이 반환.
+> **현재 문제**: `RIOReceive()` 실패 시 아무 조치 없이 반환 (`RIOSession.cpp` line 59-74).
 > 후속 Recv가 요청되지 않아 세션이 영구 정지 상태에 빠진다.
+> `OnRioIOCompleted()` Recv 경로에서도 0바이트 수신 검사가 없다 (line 313-316).
 
 ### 2.4 RIOSession 소멸자 정리
 
 - [ ] 소멸자에서 `m_RQ` 유효성 검사 후 정리
-- [ ] 미완료 I/O 취소 (CancelIoEx 또는 소켓 닫기로 처리)
-- [ ] RioContext 포인터 무효화 (댕글링 포인터 방지)
+- [ ] 미완료 I/O 취소 (소켓 닫기로 인한 암묵적 취소)
+- [ ] RioContext의 `pSession` 포인터 무효화 (댕글링 포인터 방지)
 
-> **현재 문제**: 소멸자가 비어 있어 RQ 핸들이 해제되지 않는다.
+> **현재 문제**: 소멸자가 비어 있어 RQ 핸들이 해제되지 않는다 (`RIOSession.cpp` line 41-42).
+> CQ 워커가 이미 파괴된 세션의 RioContext를 역참조할 수 있다.
+
+### 2.5 RQ 생성 파라미터 검토
+
+- [ ] `RIOCreateRequestQueue()` 깊이 값 검토 (현재 Send/Recv 각 1개 고정)
+- [ ] 동시 outstanding I/O 수 요구사항에 맞게 조정
+- [ ] RQ 생성 실패 시 세션 생성 중단 처리 (현재 로그만 출력 후 계속 진행)
+
+> **현재 코드**: `RIOCreateRequestQueue(socket, 1, 1, 1, 1, cq, cq, this)` (`RIOSession.cpp` line 20-26).
+> depth 1이면 한 번에 1개의 Send/Recv만 큐잉 가능. 부족할 수 있다.
 
 ---
 
@@ -100,26 +121,24 @@ RIO 세션을 실제 서버 로직에 연결.
 
 ### 3.1 RIOInboundSession 구현
 
-- [ ] `OnPacketReceived()` 오버라이드: 패킷 ID 기반 디스패치
-- [ ] `HandleEchoRequest()` 구현 (기존 `FastPortInboundSession`과 동일 로직)
-- [ ] `HandleBenchmarkRequest()` 구현 (3-timestamp RTT 측정)
-- [ ] `OnAccepted()`: `SessionContainer`에 등록
-- [ ] `OnDisconnected()`: `SessionContainer`에서 제거
-- [ ] 기존 `FastPortInboundSession`과 동일한 프로토콜 지원 확인
+- [x] `OnPacketReceived()` 오버라이드: 패킷 ID 기반 디스패치
+- [x] `HandleEchoRequest()` 구현 (기존 `FastPortInboundSession`과 동일 로직)
+- [x] `HandleBenchmarkRequest()` 구현 (3-timestamp RTT 측정)
+- [x] `OnAccepted()`: `SessionContainer`에 등록
+- [x] `OnDisconnected()`: `SessionContainer`에서 제거
+- [x] 기존 `FastPortInboundSession`과 동일한 프로토콜 지원 확인
 
-> **현재 문제**: `RIOInboundSession.ixx/cpp`에 클래스 선언과 생성자만 있고,
-> 메시지 핸들러가 없다. RIO 모드로 서버를 시작해도 어떤 패킷도 처리하지 못한다.
+> **완료**: `RIOInboundSession.ixx/cpp` 구현 완료 (commit `54be7e2`).
+> Echo(PROTOCOL_ID_TESTS) 및 Benchmark(0x1001/0x1002) 패킷 처리 동작 확인.
 
 ### 3.2 IOSocketAcceptor RIO 모드 분기 개선
 
-- [ ] `dynamic_cast<IOService*>` 제거 → `ENetworkMode` 기반 분기로 변경
-- [ ] RIO 모드: 소켓 옵션(Nagle, Keep-Alive) 설정 누락 수정
-- [ ] Accept된 소켓에 `WSA_FLAG_REGISTERED_IO` 플래그 설정 확인
-- [ ] 세션 팩토리 콜백에 네트워크 모드 전달
+- [ ] RIO 모드 세션에 소켓 옵션(TCP_NODELAY, Keep-Alive) 설정 누락 수정
+- [ ] Accept된 소켓의 `WSA_FLAG_REGISTERED_IO` 플래그 설정 확인
 
-> **현재 문제**: `IOSocketAcceptor.cpp`에서 `dynamic_cast`로 서비스 타입을 판별.
-> RIOService가 전달되면 IOCP `Associate()` 호출을 건너뛰는데,
-> RIOSession 내부의 소켓 옵션(TCP_NODELAY 등) 설정도 함께 누락된다.
+> **현재 문제**: `IOSocketAcceptor.cpp`에서 RIO 모드일 때 IOCP `Associate()` 호출을
+> 건너뛰는 분기가 있는데, 해당 분기에서 소켓 옵션(TCP_NODELAY 등) 설정도 함께 누락된다.
+> 이로 인해 RIO 세션에서 Nagle 알고리즘이 활성화되어 레이턴시가 증가할 수 있다.
 
 ---
 
@@ -127,30 +146,35 @@ RIO 세션을 실제 서버 로직에 연결.
 
 RIO 성능을 실제로 측정할 수 있는 환경 구축.
 
-### 4.1 RIOOutboundSession 구현
+### 4.1 FastPortBenchmark RIO 모드
 
-- [ ] `RIOSession` 상속 기반 아웃바운드 세션 클래스 생성
+- [x] `--mode rio` 옵션 추가
+- [x] `BenchmarkSessionRIO` 클래스 구현 (RIOSession 기반)
+- [x] `LatencyBenchmarkRunner`에서 RIO/IOCP 모드별 서비스/세션 분기
+- [x] RIO 모드 시 `RIOService` + `RioBufferManager` 초기화
+- [ ] IOCP vs RIO 비교 벤치마크 결과를 하나의 리포트로 출력
+- [ ] CSV 출력에 `io_mode` 컬럼 추가
+
+> **완료**: 벤치마크 도구가 `--mode rio` 옵션으로 RIO 모드를 지원한다 (commit `ed51eab`).
+> `BenchmarkSession.ixx`에 `BenchmarkSessionIOCP`와 `BenchmarkSessionRIO` 이중 구현.
+> `LatencyBenchmarkRunner`가 모드에 따라 서비스/세션을 자동 생성한다.
+
+### 4.2 RIOOutboundSession 구현
+
+- [ ] `RIOSession` 상속 기반 범용 아웃바운드 세션 클래스 생성
 - [ ] `OnConnected()` 오버라이드: 연결 완료 콜백
 - [ ] `IOSocketConnector`에서 RIO 모드 세션 생성 지원
 - [ ] 커넥터에 `ENetworkMode` 파라미터 전달
 
 > **현재 상태**: `OutboundSession`은 `IOSession`(IOCP) 전용.
-> 클라이언트 측에서 RIO를 사용하려면 별도의 RIO 기반 아웃바운드 세션이 필요하다.
+> 벤치마크에서는 `BenchmarkSessionRIO`가 RIOSession을 직접 상속하여 우회하고 있으나,
+> 범용 RIO 아웃바운드 세션은 아직 없다.
 
-### 4.2 FastPortClient RIO 모드
+### 4.3 FastPortClient RIO 모드
 
 - [ ] `FastPortClient.cpp`에 `--rio` 커맨드라인 옵션 추가
 - [ ] RIO 모드 시 `RIOOutboundSession` + `RIOService` 사용
 - [ ] 기존 IOCP 모드와 동일한 Echo 핸드셰이크 동작 확인
-
-### 4.3 FastPortBenchmark RIO 모드
-
-- [ ] `--rio` 옵션 추가
-- [ ] RIO 모드 시 `RIOService` + `RIOOutboundSession`으로 벤치마크 실행
-- [ ] IOCP vs RIO 비교 벤치마크 결과 출력
-- [ ] CSV 출력에 `io_mode` 컬럼 추가
-
-> **목표**: 동일 워크로드에서 IOCP/RIO 레이턴시, 처리량을 직접 비교.
 
 ---
 
@@ -197,27 +221,32 @@ RIO 성능을 실제로 측정할 수 있는 환경 구축.
 - [ ] `RIOSend`/`RIOReceive` 실패 코드별 분기 처리
 - [ ] RioExtension 로드 시 함수 포인터 null 검증
 - [ ] StartRioMode() 초기화 실패 시 IOCP 폴백 또는 명확한 에러 메시지
+- [ ] `RIOService::ProcessResult()`에서 RioContext/세션 포인터 null 검사 추가
 
 ### 6.2 모니터링 & 진단
 
-- [ ] RIO 모드 시작 시 상세 로그: 함수 테이블 주소, 풀 크기, CQ 용량
+- [x] RIO 모드 시작 시 상세 로그 (RIOService/RIOSession 로깅 강화, commit `29e2037`)
 - [ ] 풀 사용률 주기적 로깅 (allocated/total 비율)
 - [ ] CQ 디큐 배치 크기 통계 (평균 배치 크기, 최대 배치 크기)
 - [ ] 세션당 Send/Recv 바이트 수 카운터
 
 ### 6.3 데드 코드 정리
 
-- [ ] `RioConsumer.ixx` 제거 또는 `RIOSession`에 통합
+- [ ] `RioConsumer.ixx` 제거 또는 `RIOSession`에 통합 (현재 미사용 인터페이스)
 - [ ] `RIOSession.h` 스텁 헤더 필요성 검토 및 정리
 
 ### 6.4 테스트 보강
 
+- [x] RIOService CQ 생성 및 Start/Stop 테스트 (`RioServiceTests.cpp`)
+- [x] RIOSession 송수신 기본 테스트 (`RioSessionTests.cpp`)
+- [x] ExternalCircleBufferQueue wrap-around 및 오버플로우 테스트
+- [x] RioBufferManager 풀 초기화/할당/소진 테스트 (`RioBufferManagerTests.cpp`)
 - [ ] RIOSession 전체 라이프사이클 테스트 (생성 → 연결 → 송수신 → 해제)
 - [ ] RioBufferManager 슬라이스 해제/재사용 테스트
-- [ ] RIOService 워커 스레드 + 실제 I/O 통합 테스트
 - [ ] 동시 다수 세션 스트레스 테스트
 - [ ] IOCP ↔ RIO 모드 전환 회귀 테스트
 - [ ] 풀 소진 후 복구 시나리오 테스트
+- [ ] CQ 다중 스레드 디큐 안전성 테스트
 
 ---
 
@@ -227,12 +256,27 @@ RIO 성능을 실제로 측정할 수 있는 환경 구축.
 |------|------------------|-------------------|------|
 | Send (WSASend / RIOSend) | O | O | 구현됨 |
 | Recv (WSARecv / RIOReceive) | O | O | 구현됨 |
+| 백프레셔 큐 | X | O | **RIO가 더 발전** |
+| 패킷 프레이밍 | O | O | 구현됨 |
+| 세션 ID 자동 발급 | O | O | 구현됨 |
 | RequestDisconnect | O | X | **미구현** |
 | Zero-Byte Recv | O | X | Phase 5 |
 | OnSent 콜백 | O | X | **미구현** |
 | 소켓 옵션 설정 | O | X | **누락** |
 | 에러 복구/재시도 | O | X | **미구현** |
 | Scatter-Gather Send | O | △ (단일 청크만) | **불완전** |
-| 패킷 프레이밍 | O | O | 구현됨 |
-| 세션 ID 자동 발급 | O | O | 구현됨 |
 | 소멸자 정리 | O | X | **미구현** |
+
+---
+
+## 참고: 전체 진행률 요약
+
+| Phase | 항목 수 | 완료 | 진행률 |
+|-------|---------|------|--------|
+| Phase 1. 핵심 인프라 수정 | 15 | 0 | 0% |
+| Phase 2. RIOSession 완성 | 20 | 2 | 10% |
+| Phase 3. 애플리케이션 통합 | 8 | 6 | 75% |
+| Phase 4. 클라이언트 & 벤치마크 | 11 | 4 | 36% |
+| Phase 5. 성능 최적화 | 11 | 0 | 0% |
+| Phase 6. 안정성 & 운영 | 16 | 5 | 31% |
+| **전체** | **81** | **17** | **21%** |

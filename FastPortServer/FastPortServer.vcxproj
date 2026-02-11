@@ -134,11 +134,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="FastPortInboundSession.cpp" />
-    <ClCompile Include="FastPortInboundSession.ixx" />
+    <ClCompile Include="IOCPInboundSession.cpp" />
+    <ClCompile Include="IOCPInboundSession.ixx" />
     <ClCompile Include="FastPortServer.cpp" />
-    <ClCompile Include="FastPortServiceMode.cpp" />
-    <ClCompile Include="FastPortServiceMode.ixx" />
+    <ClCompile Include="IOCPServiceMode.cpp" />
+    <ClCompile Include="IOCPServiceMode.ixx" />
+    <ClCompile Include="RIOServiceMode.cpp" />
+    <ClCompile Include="RIOServiceMode.ixx" />
     <ClCompile Include="RIOInboundSession.cpp" />
     <ClCompile Include="RIOInboundSession.ixx" />
   </ItemGroup>

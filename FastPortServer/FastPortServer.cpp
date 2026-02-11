@@ -6,66 +6,87 @@
 #include <spdlog/spdlog.h>
 #include <thread>
 #include <chrono>
+#include <cxxopts.hpp>
 
+import std;
 import commons.logger; 
 import commons.event_listener; 
+import commons.service_mode;
 import networks.core.socket;
 
-import fastport_service_mode;
+import iocp_service_mode;
+import rio_service_mode;
 
 int main(int argc, const char* argv[])
 {
     std::string location = std::filesystem::current_path().string();
 
-    std::cout << "Current Path : " << location << std::endl;
+    // 1. 명령줄 인자 파싱
+    bool bUseRIOMode = false;
+    std::vector<const char*> filteredArgv;
+    try {
+        cxxopts::Options options("FastPortServer", "High-performance network server");
+        options.allow_unrecognised_options(); // ServiceMode의 인자(install 등)를 위해 허용
+        options.add_options()
+            ("r,rio", "Use RIO (Registered I/O) mode", cxxopts::value<bool>()->default_value("false"))
+            ("h,help", "Print usage");
 
+        auto result = options.parse(argc, const_cast<char**>(argv));
+        if (result.count("help")) {
+            std::cout << options.help() << std::endl;
+            return 0;
+        }
+        bUseRIOMode = result["rio"].as<bool>();
+
+        // ServiceMode에 전달할 인자에서 --rio 관련 제거
+        filteredArgv.reserve(argc);
+        for (int i = 0; i < argc; ++i) {
+            std::string arg = argv[i];
+            if (arg != "--rio" && arg != "-r" && arg != "-rio") {
+                filteredArgv.push_back(argv[i]);
+            }
+        }
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Error parsing options: " << e.what() << std::endl;
+        return 1;
+    }
+
+    // 2. 로거 및 기본 환경 설정
     bool bServiceMode = true;
 #if _DEBUG
     bServiceMode = false;
-#endif // #if _DEBUG
+#endif
 
     auto now = std::chrono::floor<std::chrono::minutes>(std::chrono::current_zone()->to_local(std::chrono::system_clock::now()));
-
     std::string fileName = std::format("log_{:%Y_%m_%d_%H_%M}.txt", now);
 
     auto& logger = LibCommons::Logger::GetInstance();
-    // Create Logger 
     logger.Create(location + "/" + "loggers", fileName, 1024 * 1024 * 10, 3, bServiceMode);
 
     LibNetworks::Core::Socket::Initialize();
-
     LibCommons::EventListener::GetInstance().Init(std::thread::hardware_concurrency());
 
-    std::shared_ptr<FastPortServiceMode>  pServiceMode = std::make_shared<FastPortServiceMode>();
-    if (!pServiceMode->ParseArgs(argc, argv))
+    // 3. 모드에 따른 서비스 생성 및 실행
+    std::shared_ptr<LibCommons::ServiceMode> pService;
+    if (bUseRIOMode)
     {
-        return 0;
+        pService = std::make_shared<RIOServiceMode>();
+    }
+    else
+    {
+        pService = std::make_shared<IOCPServiceMode>();
     }
 
-    // --rio 또는 -r 옵션을 제거한 새로운 argv 생성
-    std::vector<const char*> newArgv;
-    newArgv.reserve(argc);
-    for (int i = 0; i < argc; ++i)
-    {
-        std::string arg = argv[i];
-        if (arg != "--rio" && arg != "-r")
-        {
-            newArgv.push_back(argv[i]);
-        }
-        else
-        {
-            // 값이 있는 옵션이라면 다음 인자도 스킵해야 하지만, 
-            // rio는 bool 옵션이므로 해당 인자만 스킵하면 됨.
-        }
-    }
+    logger.LogInfo("Main", "FastPort Starting in {} mode...", (bUseRIOMode ? "RIO" : "IOCP"));
 
-    pServiceMode->Execute(static_cast<int>(newArgv.size()), newArgv.data());
+    pService->Execute(static_cast<DWORD>(filteredArgv.size()), filteredArgv.data());
 
-    logger.LogInfo("Main", "FastPort Started. V : {}", "Started.");
 #if _DEBUG 
-    pServiceMode->Wait();
-#endif // #if _DEBUG
-    logger.LogInfo("Main", "FastPort Started. V : {}", "Closed.");
+    pService->Wait();
+#endif
+    logger.LogInfo("Main", "FastPort Closed.");
+    return 0;
 }
 
 // 프로그램 실행: <Ctrl+F5> 또는 [디버그] > [디버깅하지 않고 시작] 메뉴

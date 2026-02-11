@@ -56,10 +56,12 @@ void RIOInboundSession::OnAccepted()
 void RIOInboundSession::OnDisconnected()
 {
     __super::OnDisconnected();
+
+    LibCommons::Logger::GetInstance().LogInfo("RIOInboundSession", "OnDisconnected. Session Id : {}", GetSessionId());
+
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
     sessions.Remove(GetSessionId());
 
-    LibCommons::Logger::GetInstance().LogInfo("RIOInboundSession", "OnDisconnected. Session Id : {}", GetSessionId());
 }
 
 void RIOInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPacket)
@@ -77,7 +79,7 @@ void RIOInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPack
         HandleEchoRequest(rfPacket);
         break;
     default:
-        LibCommons::Logger::GetInstance().LogWarning("FastPortInboundSession", "OnPacketReceived, Unknown packet id : {}. Session Id : {}", packetId, GetSessionId());
+        LibCommons::Logger::GetInstance().LogWarning("RIOInboundSession", "OnPacketReceived, Unknown packet id : {}. Session Id : {}", packetId, GetSessionId());
         break;
     }
 }
