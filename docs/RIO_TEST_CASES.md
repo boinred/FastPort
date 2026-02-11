@@ -71,7 +71,7 @@ This document outlines the test cases required to verify the integrity and perfo
 ## 5. 버퍼 어댑터 (ExternalCircleBufferQueue)
 - [x] **Wrap-around 로직**: 순환 버퍼가 등록된 메모리 세그먼트의 끝을 넘어가는 데이터를 올바르게 처리하는지 확인.
 - [x] **Zero-Copy 무결성**: `PacketFramer`가 중간 복사 없이 `std::span`을 통해 RIO 메모리에서 직접 읽는지 확인.
-- [ ] **오버플로 방지**: RIO 송신 슬라이스가 가득 찼을 때 `AllocateWrite`가 올바르게 실패하는지 확인.
+- [x] **오버플로 방지**: RIO 송신 슬라이스가 가득 찼을 때 `AllocateWrite`가 올바르게 실패하는지 확인.
 
 ## 6. 통합 및 호환성
 - [ ] **RIO 서버 vs IOCP 클라이언트**: RIO 활성화 서버와 IOCP 기반 클라이언트 간의 완전한 통신 호환성 확인.

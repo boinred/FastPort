@@ -157,5 +157,45 @@ namespace LibNetworksTests
             // Packet 클래스에 GetPayloadString 같은게 없으므로 재구성해서 비교하거나...
             // 여기서는 ID와 성공 여부만으로도 Framer가 경계 처리를 잘 했다고 볼 수 있음.
         }
+
+        // 버퍼 오버플로우 방지 로직 검증
+        TEST_METHOD(TestOverflowPrevention)
+        {
+            // 100바이트 버퍼
+            std::vector<std::byte> storage(100);
+            LibCommons::Buffers::ExternalCircleBufferQueue queue(storage);
+
+            std::vector<std::span<std::byte>> outBuffers;
+
+            // 1. 80바이트 할당 (성공)
+            Assert::IsTrue(queue.AllocateWrite(80, outBuffers));
+            Assert::AreEqual((size_t)80, queue.CanReadSize());
+            Assert::AreEqual((size_t)20, queue.CanWriteSize());
+
+            // 2. 30바이트 할당 시도 (실패해야 함, 남은 공간 20)
+            Assert::IsFalse(queue.AllocateWrite(30, outBuffers));
+            
+            // 상태 변화 없어야 함
+            Assert::AreEqual((size_t)80, queue.CanReadSize());
+            Assert::AreEqual((size_t)20, queue.CanWriteSize());
+
+            // 3. 20바이트 할당 (성공, 버퍼 가득 참)
+            Assert::IsTrue(queue.AllocateWrite(20, outBuffers));
+            Assert::AreEqual((size_t)100, queue.CanReadSize());
+            Assert::AreEqual((size_t)0, queue.CanWriteSize());
+
+            // 4. 1바이트 할당 시도 (실패)
+            Assert::IsFalse(queue.AllocateWrite(1, outBuffers));
+
+            // 5. 50바이트 소비
+            Assert::IsTrue(queue.Consume(50));
+            Assert::AreEqual((size_t)50, queue.CanReadSize());
+            Assert::AreEqual((size_t)50, queue.CanWriteSize());
+
+            // 6. 40바이트 재할당 (성공)
+            Assert::IsTrue(queue.AllocateWrite(40, outBuffers));
+            Assert::AreEqual((size_t)90, queue.CanReadSize());
+            Assert::AreEqual((size_t)10, queue.CanWriteSize());
+        }
     };
 }
