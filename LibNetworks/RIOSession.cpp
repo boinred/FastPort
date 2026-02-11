@@ -304,7 +304,9 @@ void RIOSession::OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::R
     {
         LibCommons::Logger::GetInstance().LogInfo("RIOSession", "OnRioIOCompleted - Disconnected detected. Session Id : {}", GetSessionId());
         m_bIsDisconnected = true;
+
         OnDisconnected();
+
         return;
     }
 

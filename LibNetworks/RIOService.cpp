@@ -24,6 +24,7 @@ bool RIOService::Initialize(uint32_t maxCompletionResults)
 {
     if (m_CQ != RIO_INVALID_CQ)
     {
+        LibCommons::Logger::GetInstance().LogWarning("RIOService", "Initialize called but Completion Queue already exists. Ignoring.");
         return true;
     }
 
@@ -49,6 +50,8 @@ bool RIOService::Start(uint32_t threadCount)
     {
         m_WorkerThreads.emplace_back(&RIOService::WorkerLoop, this);
     }
+
+    LibCommons::Logger::GetInstance().LogInfo("RIOService", "Started with {} worker threads.", threadCount);
 
     return true;
 }
@@ -98,6 +101,8 @@ void RIOService::WorkerLoop()
 
         for (ULONG i = 0; i < count; ++i)
         {
+            LibCommons::Logger::GetInstance().LogInfo("RIOService", "Processing RIO result: Status : {}, BytesTransferred : {}, count : {}", results[i].Status, results[i].BytesTransferred, count);
+
             RIOService::ProcessResult(results[i]);
         }
     }
@@ -111,6 +116,8 @@ void RIOService::ProcessResult(const RIORESULT& result)
         LibCommons::Logger::GetInstance().LogError("RIOService", "Request Context is not valid.");
         return;
     }
+
+    LibCommons::Logger::GetInstance().LogInfo("RIOService", "Processing RIO result in ProcessResult. Status : {}, BytesTransferred : {}, Operation Type : {}", result.Status, result.BytesTransferred, (int)pContext->OpType);
 
     LibNetworks::Sessions::RIOSession* pSession = reinterpret_cast<LibNetworks::Sessions::RIOSession*>(pContext->pSession);
 
