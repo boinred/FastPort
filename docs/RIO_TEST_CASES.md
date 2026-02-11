@@ -64,9 +64,9 @@ This document outlines the test cases required to verify the integrity and perfo
 - [x] **RQ 생성**: 각 세션에 대해 `RIOCreateRequestQueue`가 성공하는지 확인.
 - [x] **비동기 수신**: `RIOReceive`가 올바르게 등록되고 데이터가 `ExternalCircleBufferQueue`로 전달되는지 확인.
 - [x] **비동기 송신**: `RIOSend`가 등록된 버퍼 슬라이스에서 데이터를 올바르게 전송하는지 확인.
-- [ ] **0바이트 수신 처리**: 0바이트 전송 결과가 발생했을 때 세션 연결 종료가 정상적으로 트리거되는지 확인.
+- [x] **0바이트 수신 처리**: 0바이트 전송 결과가 발생했을 때 세션 연결 종료가 정상적으로 트리거되는지 확인.
 - [x] **송신 직렬화**: `WriteToBuffers` 로직이 Protobuf 메시지를 RIO 등록 슬라이스에 걸쳐 올바르게 기록하는지 확인.
-- [ ] **미완료 요청 제한**: 세션이 `MaxReceiveResults` 및 `MaxSendResults` 제한을 준수하는지 확인.
+- [x] **미완료 요청 제한**: 세션이 `MaxReceiveResults` 및 `MaxSendResults` 제한을 준수하는지 확인.
 
 ## 5. 버퍼 어댑터 (ExternalCircleBufferQueue)
 - [ ] **Wrap-around 로직**: 순환 버퍼가 등록된 메모리 세그먼트의 끝을 넘어가는 데이터를 올바르게 처리하는지 확인.

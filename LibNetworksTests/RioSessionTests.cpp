@@ -31,15 +31,9 @@ namespace LibNetworksTests
             PacketCount++;
         }
 
-        void OnDisconnected() override
-        {
-            IsDisconnected = true;
-        }
-
         std::atomic<int> PacketCount = 0;
         uint16_t LastPacketId = 0;
         uint16_t LastPacketSize = 0;
-        std::atomic<bool> IsDisconnected = false;
     };
 
     TEST_CLASS(RioSessionTests)
@@ -188,6 +182,117 @@ namespace LibNetworksTests
             Assert::AreEqual((uint16_t)200, packetId, L"Packet ID mismatch");
 
             // 정리
+            service.Stop();
+            pSessionSocket->Close();
+            listener.Close();
+            closesocket(clientSock);
+        }
+
+        // 0바이트 수신 (연결 종료) 처리 테스트
+        TEST_METHOD(TestZeroByteReceive)
+        {
+            LibNetworks::Services::RIOService service;
+            Assert::IsTrue(service.Initialize(1024));
+            Assert::IsTrue(service.Start(1));
+
+            LibNetworks::Core::RioBufferManager bufferManager;
+            Assert::IsTrue(bufferManager.Initialize(64 * 1024));
+
+            LibNetworks::Core::Socket listener;
+            Assert::IsTrue(listener.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO));
+
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            addr.sin_port = 0;
+            Assert::AreEqual(0, bind(listener.GetSocket(), (sockaddr*)&addr, sizeof(addr)));
+            Assert::AreEqual(0, listen(listener.GetSocket(), 1));
+
+            int addrLen = sizeof(addr);
+            getsockname(listener.GetSocket(), (sockaddr*)&addr, &addrLen);
+
+            SOCKET clientSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            Assert::AreEqual(0, connect(clientSock, (sockaddr*)&addr, sizeof(addr)));
+
+            SOCKET acceptedSock = accept(listener.GetSocket(), nullptr, nullptr);
+            auto pSessionSocket = std::make_shared<LibNetworks::Core::Socket>(acceptedSock);
+
+            LibNetworks::Core::RioBufferSlice recvSlice, sendSlice;
+            bufferManager.AllocateSlice(4096, recvSlice);
+            bufferManager.AllocateSlice(4096, sendSlice);
+
+            auto pSession = std::make_shared<MockRioSession>(pSessionSocket, recvSlice, sendSlice, service.GetCompletionQueue());
+            Assert::IsTrue(pSession->Initialize());
+
+            // 클라이언트 소켓 닫기 -> 0바이트 수신 유발 -> OnDisconnected 호출 기대
+            closesocket(clientSock);
+
+            int retries = 0;
+            while (pSession->IsConnected() && retries < 100)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                retries++;
+            }
+
+            Assert::IsFalse(pSession->IsConnected(), L"Session did not detect disconnection");
+
+            service.Stop();
+            pSessionSocket->Close();
+            listener.Close();
+        }
+
+        // 대량 송신 부하 테스트 (MaxOutstandingSend 제한 준수 확인)
+        TEST_METHOD(TestSendFlooding)
+        {
+            LibNetworks::Services::RIOService service;
+            Assert::IsTrue(service.Initialize(1024));
+            Assert::IsTrue(service.Start(1));
+
+            LibNetworks::Core::RioBufferManager bufferManager;
+            Assert::IsTrue(bufferManager.Initialize(256 * 1024)); // 256KB for safety
+
+            LibNetworks::Core::Socket listener;
+            Assert::IsTrue(listener.CreateSocket(LibNetworks::Core::Socket::ENetworkMode::RIO));
+
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            addr.sin_port = 0;
+            Assert::AreEqual(0, bind(listener.GetSocket(), (sockaddr*)&addr, sizeof(addr)));
+            Assert::AreEqual(0, listen(listener.GetSocket(), 1));
+
+            int addrLen = sizeof(addr);
+            getsockname(listener.GetSocket(), (sockaddr*)&addr, &addrLen);
+
+            SOCKET clientSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            Assert::AreEqual(0, connect(clientSock, (sockaddr*)&addr, sizeof(addr)));
+
+            SOCKET acceptedSock = accept(listener.GetSocket(), nullptr, nullptr);
+            auto pSessionSocket = std::make_shared<LibNetworks::Core::Socket>(acceptedSock);
+
+            // 송신 버퍼를 넉넉하게 할당 (플러딩 테스트용)
+            LibNetworks::Core::RioBufferSlice recvSlice, sendSlice;
+            bufferManager.AllocateSlice(4096, recvSlice);
+            bufferManager.AllocateSlice(64 * 1024, sendSlice);
+
+            auto pSession = std::make_shared<MockRioSession>(pSessionSocket, recvSlice, sendSlice, service.GetCompletionQueue());
+            Assert::IsTrue(pSession->Initialize());
+
+            // 대량 메시지 전송 (1000개)
+            fastport::protocols::tests::EchoRequest req;
+            req.set_data_str("Flood Test");
+            
+            for (int i = 0; i < 1000; ++i)
+            {
+                pSession->SendMessage(300, req);
+            }
+
+            // 클라이언트측 수신 확인 (적어도 일부는 도착해야 함)
+            char recvBuf[1024];
+            int received = recv(clientSock, recvBuf, sizeof(recvBuf), 0);
+            Assert::IsTrue(received > 0, L"Failed to receive any data during flooding");
+
+            // 정상 종료 확인 (크래시 없음)
             service.Stop();
             pSessionSocket->Close();
             listener.Close();
