@@ -160,6 +160,7 @@
     <ClCompile Include="LibNetworksTests.cpp" />
     <ClCompile Include="PacketFramerTests.cpp" />
     <ClCompile Include="RioBufferManagerTests.cpp" />
+    <ClCompile Include="RioBufferAdapterTests.cpp" />
     <ClCompile Include="RioFoundationTests.cpp" />
     <ClCompile Include="RioServiceTests.cpp" />
     <ClCompile Include="RioSessionTests.cpp" />
