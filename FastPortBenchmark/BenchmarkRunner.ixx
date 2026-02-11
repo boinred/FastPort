@@ -1,19 +1,14 @@
-﻿#pragma once
+export module benchmark.runner;
 
-#include <functional>
-#include <memory>
-#include <atomic>
-#include <mutex>
-#include <condition_variable>
-#include <string>
-
-#include "BenchmarkStats.h"
+import std;
+import benchmark.stats;
 
 namespace FastPortBenchmark
 {
+    using namespace std;
 
 // 벤치마크 설정
-struct BenchmarkConfig
+export struct BenchmarkConfig
 {
     std::string testName = "Default";
     std::string serverHost = "127.0.0.1";
@@ -25,10 +20,11 @@ struct BenchmarkConfig
     
     uint32_t timeoutMs = 5000;          // 응답 타임아웃 (밀리초)
     bool verbose = false;               // 상세 출력
+    bool useRio = false;                // RIO 사용 여부
 };
 
 // 벤치마크 진행 상태
-enum class BenchmarkState
+export enum class BenchmarkState
 {
     Idle,
     Connecting,
@@ -39,7 +35,7 @@ enum class BenchmarkState
 };
 
 // 벤치마크 진행 콜백
-struct BenchmarkCallbacks
+export struct BenchmarkCallbacks
 {
     std::function<void(BenchmarkState state)> onStateChanged;
     std::function<void(size_t current, size_t total)> onProgress;
@@ -48,7 +44,7 @@ struct BenchmarkCallbacks
 };
 
 // 벤치마크 실행기 인터페이스
-class IBenchmarkRunner
+export class IBenchmarkRunner
 {
 public:
     virtual ~IBenchmarkRunner() = default;
@@ -60,7 +56,7 @@ public:
 };
 
 // 동기화 대기 헬퍼
-class BenchmarkWaiter
+export class BenchmarkWaiter
 {
 public:
     void Signal()

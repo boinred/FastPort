@@ -132,14 +132,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="BenchmarkRunner.ixx" />
+    <ClCompile Include="BenchmarkStats.ixx" />
     <ClCompile Include="FastPortBenchmark.cpp" />
     <ClCompile Include="LatencyBenchmarkRunner.cpp" />
     <ClCompile Include="BenchmarkSession.ixx" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="BenchmarkStats.h" />
-    <ClInclude Include="BenchmarkRunner.h" />
-    <ClInclude Include="LatencyBenchmarkRunner.h" />
+    <ClCompile Include="LatencyBenchmarkRunner.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">
@@ -156,5 +154,3 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
-
-

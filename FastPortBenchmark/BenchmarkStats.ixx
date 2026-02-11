@@ -1,20 +1,13 @@
-﻿#pragma once
+﻿export module benchmark.stats;
 
-#include <chrono>
-#include <vector>
-#include <algorithm>
-#include <numeric>
-#include <cmath>
-#include <string>
-#include <sstream>
-#include <iomanip>
-#include <cstdint>
+import std;
 
 namespace FastPortBenchmark
 {
+    using namespace std;
 
 // 고정밀 시간 측정
-class HighResolutionTimer
+export class HighResolutionTimer
 {
 public:
     using Clock = std::chrono::high_resolution_clock;
@@ -25,8 +18,7 @@ public:
 
     static uint64_t NowNs()
     {
-        return static_cast<uint64_t>(
-            std::chrono::duration_cast<Duration>(Now().time_since_epoch()).count());
+        return static_cast<uint64_t>(std::chrono::duration_cast<Duration>(Now().time_since_epoch()).count());
     }
 
     static double ToMicroseconds(double ns) { return ns / 1000.0; }
@@ -40,7 +32,7 @@ public:
 };
 
 // 벤치마크 결과 통계
-struct BenchmarkStats
+export struct BenchmarkStats
 {
     std::string testName;
     size_t iterations = 0;
@@ -122,7 +114,7 @@ struct BenchmarkStats
 };
 
 // 레이턴시 샘플 수집 및 통계 계산
-class LatencyCollector
+export class LatencyCollector
 {
 public:
     void Reserve(size_t count)

@@ -18,13 +18,13 @@ namespace LibNetworks::Sessions
 RIOSession::RIOSession(const std::shared_ptr<Core::Socket>& pSocket, const Core::RioBufferSlice& recvSlice, const Core::RioBufferSlice& sendSlice, RIO_CQ completionQueue)
     : m_pSocket(pSocket), m_RecvSlice(recvSlice), m_SendSlice(sendSlice)
 {
-    m_RQ = Core::RioExtension::GetTable().RIOCreateRequestQueue(
-        pSocket->GetSocket(),
-        1, 1, 1, 1,
-        completionQueue,
-        completionQueue,
-        this
-    );
+    m_RQ = Core::RioExtension::GetTable().RIOCreateRequestQueue(pSocket->GetSocket(), 1, 1, 1, 1,completionQueue, completionQueue, this);
+    if (m_RQ == RIO_INVALID_RQ)
+    {
+        LibCommons::Logger::GetInstance().LogError("RIOSession", "RIOSession::Constructor - RIOCreateRequestQueue failed. Socket : {}, Error : {}", pSocket->GetSocket(), WSAGetLastError());
+
+        // 
+    }
 
     m_RecvContext.OpType = Core::RioOperationType::Receive;
     m_RecvContext.pSession = this;

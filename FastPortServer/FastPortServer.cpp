@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <spdlog/spdlog.h>
 #include <thread>
+#include <chrono>
 
 import commons.logger; 
 import commons.event_listener; 
@@ -23,12 +24,9 @@ int main(int argc, const char* argv[])
     bServiceMode = false;
 #endif // #if _DEBUG
 
-    std::time_t t = std::time(nullptr);
+    auto now = std::chrono::floor<std::chrono::minutes>(std::chrono::current_zone()->to_local(std::chrono::system_clock::now()));
 
-    std::tm now{};
-    localtime_s(&now, &t);
-
-    std::string fileName = std::format("log_{:04}_{:02}_{:02}_{:02}_{:02}.txt", now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour, now.tm_min);
+    std::string fileName = std::format("log_{:%Y_%m_%d_%H_%M}.txt", now);
 
     auto& logger = LibCommons::Logger::GetInstance();
     // Create Logger 
@@ -43,7 +41,25 @@ int main(int argc, const char* argv[])
     {
         return 0;
     }
-    pServiceMode->Execute(argc, argv);
+
+    // --rio 또는 -r 옵션을 제거한 새로운 argv 생성
+    std::vector<const char*> newArgv;
+    newArgv.reserve(argc);
+    for (int i = 0; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg != "--rio" && arg != "-r")
+        {
+            newArgv.push_back(argv[i]);
+        }
+        else
+        {
+            // 값이 있는 옵션이라면 다음 인자도 스킵해야 하지만, 
+            // rio는 bool 옵션이므로 해당 인자만 스킵하면 됨.
+        }
+    }
+
+    pServiceMode->Execute(static_cast<int>(newArgv.size()), newArgv.data());
 
     logger.LogInfo("Main", "FastPort Started. V : {}", "Started.");
 #if _DEBUG 
