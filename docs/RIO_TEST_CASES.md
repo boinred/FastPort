@@ -14,10 +14,10 @@ This document outlines the test cases required to verify the integrity and perfo
 - [x] **Alignment Check**: Confirm that all allocated slices meet RIO's memory alignment requirements.
 
 ## 3. RIOService (Completion Queue)
-- [ ] **CQ Creation**: Verify that `RIOCreateCompletionQueue` succeeds with the specified maximum results.
-- [ ] **Worker Thread Dispatch**: Confirm that `RIODequeueCompletion` correctly captures completions and dispatches them to `OnRioIOCompleted`.
-- [ ] **CQ Corruption Recovery**: (Advanced) Simulate or handle `RIO_CORRUPT_CQ` returns during high-load polling.
-- [ ] **Graceful Stop**: Ensure that all worker threads join correctly and the CQ is closed without leaks.
+- [x] **CQ Creation**: Verify that `RIOCreateCompletionQueue` succeeds with the specified maximum results.
+- [x] **Worker Thread Dispatch**: Confirm that `RIODequeueCompletion` correctly captures completions and dispatches them to `OnRioIOCompleted`.
+- [x] **CQ Corruption Recovery**: (Advanced) Simulate or handle `RIO_CORRUPT_CQ` returns during high-load polling.
+- [x] **Graceful Stop**: Ensure that all worker threads join correctly and the CQ is closed without leaks.
 
 ## 4. RIOSession (Request Queue & Data Transfer)
 - [ ] **RQ Creation**: Verify that `RIOCreateRequestQueue` succeeds for each new session.
@@ -55,17 +55,17 @@ This document outlines the test cases required to verify the integrity and perfo
 - [x] **정렬 확인**: 할당된 모든 슬라이스가 RIO의 메모리 정렬 요구사항을 충족하는지 확인.
 
 ## 3. RIOService (완료 큐)
-- [ ] **CQ 생성**: 지정된 최대 결과 수로 `RIOCreateCompletionQueue`가 성공하는지 확인.
-- [ ] **워커 스레드 디스패치**: `RIODequeueCompletion`이 완료 이벤트를 올바르게 캡처하고 `OnRioIOCompleted`로 전달하는지 확인.
-- [ ] **CQ 손상 복구**: (고급) 고부하 폴링 중 `RIO_CORRUPT_CQ` 반환 시의 처리 확인.
-- [ ] **정상 종료**: 모든 워커 스레드가 올바르게 종료(join)되고 CQ가 누수 없이 닫히는지 확인.
+- [x] **CQ 생성**: 지정된 최대 결과 수로 `RIOCreateCompletionQueue`가 성공하는지 확인.
+- [x] **워커 스레드 디스패치**: `RIODequeueCompletion`이 완료 이벤트를 올바르게 캡처하고 `OnRioIOCompleted`로 전달하는지 확인.
+- [x] **CQ 손상 복구**: (고급) 고부하 폴링 중 `RIO_CORRUPT_CQ` 반환 시의 처리 확인.
+- [x] **정상 종료**: 모든 워커 스레드가 올바르게 종료(join)되고 CQ가 누수 없이 닫히는지 확인.
 
 ## 4. RIOSession (요청 큐 및 데이터 전송)
-- [ ] **RQ 생성**: 각 세션에 대해 `RIOCreateRequestQueue`가 성공하는지 확인.
-- [ ] **비동기 수신**: `RIOReceive`가 올바르게 등록되고 데이터가 `ExternalCircleBufferQueue`로 전달되는지 확인.
-- [ ] **비동기 송신**: `RIOSend`가 등록된 버퍼 슬라이스에서 데이터를 올바르게 전송하는지 확인.
+- [x] **RQ 생성**: 각 세션에 대해 `RIOCreateRequestQueue`가 성공하는지 확인.
+- [x] **비동기 수신**: `RIOReceive`가 올바르게 등록되고 데이터가 `ExternalCircleBufferQueue`로 전달되는지 확인.
+- [x] **비동기 송신**: `RIOSend`가 등록된 버퍼 슬라이스에서 데이터를 올바르게 전송하는지 확인.
 - [ ] **0바이트 수신 처리**: 0바이트 전송 결과가 발생했을 때 세션 연결 종료가 정상적으로 트리거되는지 확인.
-- [ ] **송신 직렬화**: `WriteToBuffers` 로직이 Protobuf 메시지를 RIO 등록 슬라이스에 걸쳐 올바르게 기록하는지 확인.
+- [x] **송신 직렬화**: `WriteToBuffers` 로직이 Protobuf 메시지를 RIO 등록 슬라이스에 걸쳐 올바르게 기록하는지 확인.
 - [ ] **미완료 요청 제한**: 세션이 `MaxReceiveResults` 및 `MaxSendResults` 제한을 준수하는지 확인.
 
 ## 5. 버퍼 어댑터 (ExternalCircleBufferQueue)

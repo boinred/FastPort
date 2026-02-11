@@ -5,5 +5,7 @@
     <ClCompile Include="PacketFramerTests.cpp" />
     <ClCompile Include="RioBufferManagerTests.cpp" />
     <ClCompile Include="RioFoundationTests.cpp" />
+    <ClCompile Include="RioServiceTests.cpp" />
+    <ClCompile Include="RioSessionTests.cpp" />
   </ItemGroup>
 </Project>

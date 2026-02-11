@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 #include <span>
+#include <spdlog/spdlog.h>
 
 module networks.sessions.rio_session;
 
@@ -44,6 +45,7 @@ bool RIOSession::Initialize()
 {
     if (m_RQ == RIO_INVALID_RQ)
     {
+        LibCommons::Logger::GetInstance().LogError("RIOSession", "RIOSession::Initialize - Failed to create RIO Request Queue. Session Id : {}", GetSessionId());
         return false;
     }
 
@@ -56,6 +58,8 @@ void RIOSession::RequestRecv()
 {
     if (m_bIsDisconnected)
     {
+        LibCommons::Logger::GetInstance().LogWarning("RIOSession", "RequestRecv called on disconnected session. Session Id : {}", GetSessionId());
+
         return;
     }
 
@@ -71,6 +75,7 @@ void RIOSession::SendMessage(const uint16_t packetId, const google::protobuf::Me
 {
     if (m_bIsDisconnected)
     {
+        LibCommons::Logger::GetInstance().LogWarning("RIOSession", "SendMessage called on disconnected session. Session Id : {}", GetSessionId());
         return;
     }
 
@@ -80,6 +85,7 @@ void RIOSession::SendMessage(const uint16_t packetId, const google::protobuf::Me
     std::vector<std::span<std::byte>> buffers;
     if (!m_pSendBuffer->AllocateWrite(totalSize, buffers))
     {
+        LibCommons::Logger::GetInstance().LogWarning("RIOSession", "SendMessage failed to allocate send buffer. Session Id : {}", GetSessionId());
         return;
     }
 
@@ -103,24 +109,27 @@ void RIOSession::WriteToBuffers(const std::vector<std::span<std::byte>>& buffers
 {
     const uint8_t* pSrc = reinterpret_cast<const uint8_t*>(pData);
     size_t remaining = len;
+    size_t skip = offset;
+
     for (const auto& span : buffers)
     {
-        if (offset >= span.size())
+        if (skip >= span.size())
         {
-            offset -= span.size();
+            skip -= span.size();
             continue;
         }
 
-        size_t toCopy = (std::min)(remaining, span.size() - offset);
-        std::memcpy(span.data() + offset, pSrc, toCopy);
+        size_t toCopy = (std::min)(remaining, span.size() - skip);
+        std::memcpy(span.data() + skip, pSrc, toCopy);
         pSrc += toCopy;
         remaining -= toCopy;
-        offset = 0;
+        skip = 0;
         if (remaining == 0)
         {
             break;
         }
     }
+    offset += len;
 }
 
 void RIOSession::TryPostSendFromQueue()
@@ -128,6 +137,7 @@ void RIOSession::TryPostSendFromQueue()
     bool expected = false;
     if (!m_bSendInProgress.compare_exchange_strong(expected, true))
     {
+
         return;
     }
 
@@ -147,6 +157,7 @@ void RIOSession::TryPostSendFromQueue()
     if (!Core::RioExtension::GetTable().RIOSend(m_RQ, &buf, 1, 0, &m_SendContext))
     {
         m_bSendInProgress = false;
+        LibCommons::Logger::GetInstance().LogError("RIOSession", "TryPostSendFromQueue - RIOSend failed. Session Id : {}", GetSessionId());
     }
 }
 
@@ -154,6 +165,7 @@ void RIOSession::OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::R
 {
     if (!bSuccess || (opType == Core::RioOperationType::Receive && bytesTransferred == 0))
     {
+        LibCommons::Logger::GetInstance().LogInfo("RIOSession", "OnRioIOCompleted - Disconnected detected. Session Id : {}", GetSessionId());
         m_bIsDisconnected = true;
         OnDisconnected();
         return;
@@ -174,6 +186,22 @@ void RIOSession::OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::R
     }
 }
 
+void RIOSession::OnAccepted()
+{
+    LibCommons::Logger::GetInstance().LogInfo("RIOSession", "Session accepted. Session Id : {}", GetSessionId());
+
+}
+
+void RIOSession::OnConnected()
+{
+    LibCommons::Logger::GetInstance().LogInfo("RIOSession", "Session connected. Session Id : {}", GetSessionId());
+}
+
+void RIOSession::OnDisconnected()
+{
+    LibCommons::Logger::GetInstance().LogInfo("RIOSession", "Session disconnected. Session Id : {}", GetSessionId());
+}
+
 void RIOSession::ReadReceivedBuffers()
 {
     while (true)
@@ -190,5 +218,7 @@ void RIOSession::ReadReceivedBuffers()
         }
     }
 }
+
+
 
 } // namespace LibNetworks::Sessions

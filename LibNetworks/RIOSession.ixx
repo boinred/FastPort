@@ -41,9 +41,9 @@ public:
     // IRioConsumer 상속 대신 직접 호출될 함수
     void OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::RioOperationType opType);
 
-    virtual void OnAccepted() override {}
-    virtual void OnConnected() override {}
-    virtual void OnDisconnected() override {}
+    virtual void OnAccepted() override;
+    virtual void OnConnected() override;
+    virtual void OnDisconnected() override;
 
 protected:
     virtual void OnPacketReceived(const Core::Packet& rfPacket) {}

@@ -30,6 +30,8 @@ bool RIOService::Initialize(uint32_t maxCompletionResults)
     m_CQ = Core::RioExtension::GetTable().RIOCreateCompletionQueue(maxCompletionResults, nullptr);
     if (m_CQ == RIO_INVALID_CQ)
     {
+        LibCommons::Logger::GetInstance().LogError("RIOService", "Failed to create RIO Completion Queue.");
+
         return false;
     }
 
