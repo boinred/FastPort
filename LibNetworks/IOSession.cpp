@@ -13,6 +13,7 @@ module networks.sessions.io_session;
 import commons.logger;
 import networks.core.packet;
 import networks.core.packet_framer;
+import networks.core.socket;
 
 
 namespace LibNetworks::Sessions
