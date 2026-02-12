@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include <vector>
 #include <algorithm>
@@ -7,9 +7,7 @@
 export module commons.buffers.external_circle_buffer_queue;
 
 import std;
-import commons.rwlock;
 import commons.buffers.ibuffer;
-import commons.logger;
 
 namespace LibCommons::Buffers
 {
@@ -17,6 +15,10 @@ namespace LibCommons::Buffers
 /**
  * 외부에서 관리되는 메모리(std::span)를 사용하는 원형 버퍼 큐.
  * RIO와 같이 미리 등록된 메모리를 사용해야 하는 경우 유용.
+ * 
+ * [Thread Safety]
+ * 이 클래스는 스레드 세이프하지 않습니다. 
+ * 멀티 스레드 환경에서 사용할 경우 반드시 외부에서 동기화(Lock)를 보장해야 합니다.
  */
 export class ExternalCircleBufferQueue final : public IBuffer
 {
@@ -33,8 +35,6 @@ public:
 
     bool Write(std::span<const std::byte> data) override
     {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
-
         const size_t size = data.size();
         if (m_Capacity - m_Size < size)
         {
@@ -60,8 +60,6 @@ public:
 
     bool Pop(std::span<std::byte> outBuffer) override
     {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
-
         const size_t size = outBuffer.size();
         if (m_Size < size)
         {
@@ -87,8 +85,6 @@ public:
 
     bool Peek(std::span<std::byte> outBuffer) override
     {
-        auto lock = LibCommons::ReadLockBlock(m_RWLock);
-
         const size_t size = outBuffer.size();
         if (m_Size < size)
         {
@@ -111,7 +107,6 @@ public:
 
     size_t GetReadBuffers(std::vector<std::span<const std::byte>>& outBuffers) override
     {
-        auto lock = LibCommons::ReadLockBlock(m_RWLock);
         outBuffers.clear();
 
         if (m_Size == 0)
@@ -133,7 +128,6 @@ public:
 
     bool AllocateWrite(size_t size, std::vector<std::span<std::byte>>& outBuffers) override
     {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
         outBuffers.clear();
 
         if (m_Capacity - m_Size < size)
@@ -160,7 +154,6 @@ public:
 
     bool Consume(size_t size) override
     {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
         if (m_Size < size)
         {
             return false;
@@ -174,19 +167,16 @@ public:
 
     size_t CanReadSize() const override
     {
-        auto lock = LibCommons::ReadLockBlock(m_RWLock);
         return m_Size;
     }
 
     size_t CanWriteSize() const override
     {
-        auto lock = LibCommons::ReadLockBlock(m_RWLock);
         return m_Capacity - m_Size;
     }
 
     void Clear() override
     {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
         m_Head = 0;
         m_Tail = 0;
         m_Size = 0;
@@ -194,7 +184,6 @@ public:
 
     size_t GetWriteableBuffers(std::vector<std::span<std::byte>>& outBuffers) override
     {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
         outBuffers.clear();
 
         const size_t freeSpace = m_Capacity - m_Size;
@@ -219,8 +208,6 @@ public:
 
     bool CommitWrite(size_t size) override
     {
-        auto lock = LibCommons::WriteLockBlock(m_RWLock);
-
         if (m_Capacity - m_Size < size)
         {
             return false;
@@ -238,7 +225,6 @@ private:
     size_t m_Tail = 0;
     size_t m_Size = 0;
     size_t m_Capacity = 0;
-    mutable LibCommons::RWLock m_RWLock;
 };
 
 } // namespace LibCommons::Buffers

@@ -101,8 +101,6 @@ void RIOService::WorkerLoop()
 
         for (ULONG i = 0; i < count; ++i)
         {
-            LibCommons::Logger::GetInstance().LogInfo("RIOService", "Processing RIO result: Status : {}, BytesTransferred : {}, count : {}", results[i].Status, results[i].BytesTransferred, count);
-
             RIOService::ProcessResult(results[i]);
         }
     }
@@ -117,7 +115,8 @@ void RIOService::ProcessResult(const RIORESULT& result)
         return;
     }
 
-    LibCommons::Logger::GetInstance().LogInfo("RIOService", "Processing RIO result in ProcessResult. Status : {}, BytesTransferred : {}, Operation Type : {}", result.Status, result.BytesTransferred, (int)pContext->OpType);
+    LibCommons::Logger::GetInstance().LogInfo("RIOService", "Processing RIO result: Status : {}, BytesTransferred : {}, Operation Type : {}", 
+        result.Status, result.BytesTransferred, (pContext->OpType == Core::RioOperationType::Receive ? "Receive" : "Send"));
 
     LibNetworks::Sessions::RIOSession* pSession = reinterpret_cast<LibNetworks::Sessions::RIOSession*>(pContext->pSession);
 
