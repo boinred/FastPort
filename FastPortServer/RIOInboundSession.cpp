@@ -96,6 +96,7 @@ void RIOInboundSession::HandleBenchmarkRequest(const LibNetworks::Core::Packet& 
         return;
     }
 
+
     ::fastport::protocols::benchmark::BenchmarkResponse response;
 
     auto pHeader = response.mutable_header();
@@ -124,6 +125,7 @@ void RIOInboundSession::HandleEchoRequest(const LibNetworks::Core::Packet& rfPac
         LibCommons::Logger::GetInstance().LogError("RIOInboundSession", "HandleEchoRequest, Failed to parse. Session Id : {}, Packet Id : {}", GetSessionId(), packetId);
         return;
     }
+
 
     ::fastport::protocols::tests::EchoResponse response;
     auto pHeader = response.mutable_header();

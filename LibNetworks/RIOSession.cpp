@@ -81,9 +81,11 @@ void RIOSession::RequestRecv()
     buf.Offset = m_RecvSlice.Offset + static_cast<ULONG>(writeableBuffers[0].data() - reinterpret_cast<std::byte*>(m_RecvSlice.pData));
     buf.Length = static_cast<ULONG>(writeableBuffers[0].size());
 
+    LibCommons::Logger::GetInstance().LogDebug("RIOSession", "RequestRecv - RIOReceive called. Session Id : {}, Offset : {}, Length : {}", GetSessionId(), buf.Offset, buf.Length);
+
     if (!Core::RioExtension::GetTable().RIOReceive(m_RQ, &buf, 1, 0, &m_RecvContext))
     {
-        LibCommons::Logger::GetInstance().LogError("RIOSession", "RequestRecv - RIOReceive failed. Session Id : {}", GetSessionId());
+        LibCommons::Logger::GetInstance().LogError("RIOSession", "RequestRecv - RIOReceive failed. Session Id : {}, Error : {}", GetSessionId(), WSAGetLastError());
     }
 }
 

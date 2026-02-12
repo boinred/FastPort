@@ -54,7 +54,8 @@ void RIOServiceMode::OnStarted()
 
     m_Acceptor = LibNetworks::Core::IOSocketAcceptor::Create(LibNetworks::Core::Socket::ENetworkMode::RIO, m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
 
-    m_RioService->Start(std::thread::hardware_concurrency());
+    //m_RioService->Start(std::thread::hardware_concurrency());
+    m_RioService->Start(1);
 
     m_bRunning = nullptr != m_Acceptor;
 }
