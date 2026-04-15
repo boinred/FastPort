@@ -5,6 +5,7 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 export module networks.services.rio_service;
 
@@ -45,6 +46,7 @@ private:
     RIO_CQ m_CQ = RIO_INVALID_CQ;
     std::vector<std::thread> m_WorkerThreads;
     std::atomic<bool> m_bIsRunning = false;
+    std::mutex m_CQMutex; // RIODequeueCompletion은 thread-safe하지 않으므로 CQ 접근 직렬화 필요
 };
 
 } // namespace LibNetworks::Core

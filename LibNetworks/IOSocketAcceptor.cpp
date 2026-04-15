@@ -103,16 +103,24 @@ void IOSocketAcceptor::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
 
         std::shared_ptr<Sessions::INetworkSession> pInboundSession = m_pOnDoFuncCreateSession(pSocket);
 
-        // IOCP 모드인 경우 (Service가 IOService인 경우)에만 Associate 수행
-        if (auto pIOService = std::dynamic_pointer_cast<LibNetworks::Services::IOService>(m_pService))
+        // 명시적 모드 기반 분기: m_ListenerSocketMode로 판단
+        if (m_ListenerSocketMode == LibNetworks::Core::Socket::ENetworkMode::IOCP)
         {
+            auto pIOService = std::dynamic_pointer_cast<LibNetworks::Services::IOService>(m_pService);
+            if (!pIOService)
+            {
+                logger.LogError("IOSocketAcceptor", "IOCP mode but IOService not available. Session dropped.");
+                pSocket->Close();
+                return;
+            }
+
             auto pIOConsumer = std::dynamic_pointer_cast<Core::IIOConsumer>(pInboundSession);
             if (pIOConsumer)
             {
                 pIOService->Associate(pAcceptOverlapped->AcceptSocket, pIOConsumer->GetCompletionId());
             }
         }
-        // RIO 모드인 경우 RIOSession 내부에서 소켓 처리가 이루어짐
+        // RIO 모드: RIOSession이 내부적으로 RQ를 생성하여 소켓을 처리
 
         pInboundSession->OnAccepted();
     }

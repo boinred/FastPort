@@ -27,6 +27,9 @@ export struct RioBufferSlice
 
 /**
  * RIO 전용 등록 버퍼 관리자
+ *
+ * 고정 크기 슬라이스의 할당/반환을 지원합니다.
+ * 반환된 슬라이스는 free list에 보관되어 재사용됩니다.
  */
 export class RioBufferManager
 {
@@ -37,18 +40,29 @@ public:
     // 대용량 메모리 청크를 할당하고 RIO에 등록합니다.
     bool Initialize(uint32_t totalSize);
 
-    // 등록된 버퍼에서 슬라이스를 할당받습니다.
+    // 등록된 버퍼에서 슬라이스를 할당받습니다. 반환된 슬라이스가 있으면 재사용합니다.
     bool AllocateSlice(uint32_t size, RioBufferSlice& outSlice);
+
+    // 사용이 끝난 슬라이스를 반환합니다. 반환된 슬라이스는 free list에 보관되어 재사용됩니다.
+    void DeallocateSlice(const RioBufferSlice& slice);
 
     // 리소스 해제
     void Finalize();
+
+    // 현재 할당된 슬라이스 수
+    uint32_t GetAllocatedCount() const;
+
+    // free list에 있는 슬라이스 수
+    uint32_t GetFreeCount() const;
 
 private:
     RIO_BUFFERID m_BufferId = RIO_INVALID_BUFFERID;
     void* m_pBuffer = nullptr;
     uint32_t m_TotalSize = 0;
     uint32_t m_CurrentOffset = 0;
-    std::mutex m_Mutex;
+    uint32_t m_AllocatedCount = 0;
+    std::vector<RioBufferSlice> m_FreeList; // 반환된 슬라이스 재사용 풀
+    mutable std::mutex m_Mutex;
 };
 
 } // namespace LibNetworks::Core

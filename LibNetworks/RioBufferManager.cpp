@@ -50,6 +50,19 @@ bool RioBufferManager::AllocateSlice(uint32_t size, RioBufferSlice& outSlice)
 {
     std::lock_guard<std::mutex> lock(m_Mutex);
 
+    // free list에서 동일 크기 슬라이스 재사용 시도
+    for (auto it = m_FreeList.begin(); it != m_FreeList.end(); ++it)
+    {
+        if (it->Length == size)
+        {
+            outSlice = *it;
+            m_FreeList.erase(it);
+            ++m_AllocatedCount;
+            return true;
+        }
+    }
+
+    // 새 슬라이스 할당
     if (m_CurrentOffset + size > m_TotalSize)
     {
         return false;
@@ -61,8 +74,32 @@ bool RioBufferManager::AllocateSlice(uint32_t size, RioBufferSlice& outSlice)
     outSlice.pData = reinterpret_cast<char*>(m_pBuffer) + m_CurrentOffset;
 
     m_CurrentOffset += size;
+    ++m_AllocatedCount;
 
     return true;
+}
+
+void RioBufferManager::DeallocateSlice(const RioBufferSlice& slice)
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+
+    m_FreeList.push_back(slice);
+    if (m_AllocatedCount > 0)
+    {
+        --m_AllocatedCount;
+    }
+}
+
+uint32_t RioBufferManager::GetAllocatedCount() const
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    return m_AllocatedCount;
+}
+
+uint32_t RioBufferManager::GetFreeCount() const
+{
+    std::lock_guard<std::mutex> lock(m_Mutex);
+    return static_cast<uint32_t>(m_FreeList.size());
 }
 
 void RioBufferManager::Finalize()
