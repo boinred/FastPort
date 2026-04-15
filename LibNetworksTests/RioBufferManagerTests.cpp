@@ -85,6 +85,64 @@ namespace LibNetworksTests
             Assert::IsFalse(result2, L"Should fail when pool is exhausted");
         }
 
+        // 슬라이스 반환 후 재사용 테스트
+        TEST_METHOD(TestDeallocateAndReuse)
+        {
+            LibNetworks::Core::RioBufferManager manager;
+            uint32_t poolSize = 4096;
+            Assert::IsTrue(manager.Initialize(poolSize));
+
+            // 1. 풀 전체를 할당
+            LibNetworks::Core::RioBufferSlice slice;
+            Assert::IsTrue(manager.AllocateSlice(4096, slice));
+            Assert::AreEqual((uint32_t)1, manager.GetAllocatedCount());
+            Assert::AreEqual((uint32_t)0, manager.GetFreeCount());
+
+            // 2. 추가 할당 실패 (풀 소진)
+            LibNetworks::Core::RioBufferSlice slice2;
+            Assert::IsFalse(manager.AllocateSlice(4096, slice2));
+
+            // 3. 반환
+            manager.DeallocateSlice(slice);
+            Assert::AreEqual((uint32_t)0, manager.GetAllocatedCount());
+            Assert::AreEqual((uint32_t)1, manager.GetFreeCount());
+
+            // 4. 재할당 성공 (free list에서 재사용)
+            LibNetworks::Core::RioBufferSlice reusedSlice;
+            Assert::IsTrue(manager.AllocateSlice(4096, reusedSlice));
+            Assert::AreEqual((uint32_t)1, manager.GetAllocatedCount());
+            Assert::AreEqual((uint32_t)0, manager.GetFreeCount());
+
+            // 5. 재사용된 슬라이스는 원본과 동일한 오프셋/포인터
+            Assert::AreEqual(slice.Offset, reusedSlice.Offset);
+            Assert::AreEqual(slice.Length, reusedSlice.Length);
+            Assert::IsTrue(slice.pData == reusedSlice.pData);
+        }
+
+        // 여러 슬라이스 반환 후 순서대로 재사용
+        TEST_METHOD(TestMultipleDeallocateReuse)
+        {
+            LibNetworks::Core::RioBufferManager manager;
+            Assert::IsTrue(manager.Initialize(8192));
+
+            LibNetworks::Core::RioBufferSlice s1, s2;
+            Assert::IsTrue(manager.AllocateSlice(4096, s1));
+            Assert::IsTrue(manager.AllocateSlice(4096, s2));
+            Assert::AreEqual((uint32_t)2, manager.GetAllocatedCount());
+
+            // 반환 순서: s1, s2
+            manager.DeallocateSlice(s1);
+            manager.DeallocateSlice(s2);
+            Assert::AreEqual((uint32_t)0, manager.GetAllocatedCount());
+            Assert::AreEqual((uint32_t)2, manager.GetFreeCount());
+
+            // 재할당: free list에서 동일 크기 매칭
+            LibNetworks::Core::RioBufferSlice r1;
+            Assert::IsTrue(manager.AllocateSlice(4096, r1));
+            Assert::AreEqual((uint32_t)1, manager.GetAllocatedCount());
+            Assert::AreEqual((uint32_t)1, manager.GetFreeCount());
+        }
+
         // 메모리 정렬(Alignment) 검증 (현재 구현은 단순 순차 할당이므로 오프셋 확인)
         TEST_METHOD(TestAlignmentCheck)
         {

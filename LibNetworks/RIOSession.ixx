@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <atomic>
+#include <mutex>
 #include <span>
 #include <google/protobuf/message.h>
 
@@ -106,6 +107,8 @@ private:
     std::deque<PendingPacket> m_PendingSendQueue;
     // 전송 큐 동기화용 뮤텍스
     std::mutex m_SendQueueMutex;
+    // 수신 버퍼 동기화용 뮤텍스 (ExternalCircleBufferQueue는 thread-safe하지 않음)
+    std::mutex m_RecvMutex;
 
     // 대기 중인 총 바이트 수 (Backpressure용)
     std::atomic<size_t> m_PendingTotalBytes = 0;

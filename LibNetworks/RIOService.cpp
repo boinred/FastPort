@@ -86,7 +86,13 @@ void RIOService::WorkerLoop()
 
     while (m_bIsRunning)
     {
-        ULONG count = Core::RioExtension::GetTable().RIODequeueCompletion(m_CQ, results, MAX_RESULTS);
+        ULONG count = 0;
+        {
+            // RIODequeueCompletion은 thread-safe하지 않으므로 CQ 접근을 직렬화합니다.
+            // AD-1 결정 후 CQ 파티셔닝 또는 RIONotify+IOCP 모델로 전환 시 이 락을 제거할 수 있습니다.
+            std::lock_guard lock(m_CQMutex);
+            count = Core::RioExtension::GetTable().RIODequeueCompletion(m_CQ, results, MAX_RESULTS);
+        }
 
         if (count == 0)
         {
@@ -96,6 +102,7 @@ void RIOService::WorkerLoop()
 
         if (count == RIO_CORRUPT_CQ)
         {
+            LibCommons::Logger::GetInstance().LogError("RIOService", "WorkerLoop - RIO_CORRUPT_CQ detected. Stopping worker.");
             break;
         }
 

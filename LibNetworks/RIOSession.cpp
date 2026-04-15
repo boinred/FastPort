@@ -100,9 +100,12 @@ void RIOSession::SendMessage(const uint16_t packetId, const google::protobuf::Me
     const size_t totalSize = Core::Packet::GetHeaderSize() + Core::Packet::GetPacketIdSize() + bodySize;
 
     // Safety Check: 대기 중인 데이터가 너무 많으면 연결 종료 (Backpressure)
-    if (m_PendingTotalBytes.load(std::memory_order_relaxed) > MAX_PENDING_BYTES)
+    if (m_PendingTotalBytes.load(std::memory_order_acquire) > MAX_PENDING_BYTES)
     {
-        LibCommons::Logger::GetInstance().LogError("RIOSession", "SendMessage - Pending queue limit exceeded. Session Id : {}", GetSessionId());
+        LibCommons::Logger::GetInstance().LogWarning("RIOSession", "SendMessage - Backpressure limit exceeded ({}MB). Disconnecting session. Session Id : {}",
+            MAX_PENDING_BYTES / (1024 * 1024), GetSessionId());
+        m_bIsDisconnected = true;
+        OnDisconnected();
         return;
     }
 
@@ -270,9 +273,12 @@ void RIOSession::OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::R
     switch (opType)
     {
     case Core::RioOperationType::Receive:
-        m_pReceiveBuffer->CommitWrite(bytesTransferred);
-        ReadReceivedBuffers();
-        RequestRecv();
+        {
+            std::lock_guard lock(m_RecvMutex);
+            m_pReceiveBuffer->CommitWrite(bytesTransferred);
+            ReadReceivedBuffers();
+            RequestRecv();
+        }
         break;
     case Core::RioOperationType::Send:
         {
