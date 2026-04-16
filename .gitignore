@@ -415,3 +415,8 @@ Protocols/*.pb.*
 loggers_*/
 GEMINI.md
 /nul
+
+# Claude Code / bkit
+.claude/
+.bkit/
+.bkit-memory.json

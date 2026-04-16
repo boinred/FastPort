@@ -63,12 +63,16 @@ public:
             m_CurrentMsgPerSec = static_cast<double>(intervalMsgs) / elapsed;
             UpdatePercentiles();
 
-            // 롤링 히스토리 갱신
+            // 롤링 히스토리 갱신 (p50/p95/p99 각각)
             {
                 std::lock_guard lock(m_HistoryMutex);
-                m_LatencyHistory.push_back(static_cast<float>(m_CurrentP50));
+                m_P50History.push_back(static_cast<float>(m_CurrentP50));
+                m_P95History.push_back(static_cast<float>(m_CurrentP95));
+                m_P99History.push_back(static_cast<float>(m_CurrentP99));
                 m_ThroughputHistory.push_back(static_cast<float>(m_CurrentMsgPerSec));
-                if (m_LatencyHistory.size() > 60) m_LatencyHistory.erase(m_LatencyHistory.begin());
+                if (m_P50History.size() > 60) m_P50History.erase(m_P50History.begin());
+                if (m_P95History.size() > 60) m_P95History.erase(m_P95History.begin());
+                if (m_P99History.size() > 60) m_P99History.erase(m_P99History.begin());
                 if (m_ThroughputHistory.size() > 60) m_ThroughputHistory.erase(m_ThroughputHistory.begin());
             }
 
@@ -84,10 +88,21 @@ public:
     }
 
     // 차트 데이터 접근 (GUI 스레드에서만)
+    void GetLatencyHistory(std::vector<float>& outP50,
+                           std::vector<float>& outP95,
+                           std::vector<float>& outP99) const
+    {
+        std::lock_guard lock(m_HistoryMutex);
+        outP50 = m_P50History;
+        outP95 = m_P95History;
+        outP99 = m_P99History;
+    }
+
+    // 단순 p50만 필요한 경우 (하위호환)
     void GetLatencyHistory(std::vector<float>& out) const
     {
         std::lock_guard lock(m_HistoryMutex);
-        out = m_LatencyHistory;
+        out = m_P50History;
     }
 
     void GetThroughputHistory(std::vector<float>& out) const
@@ -109,7 +124,9 @@ public:
         m_CurrentP95 = 0;
         m_CurrentP99 = 0;
         std::lock_guard lock(m_HistoryMutex);
-        m_LatencyHistory.clear();
+        m_P50History.clear();
+        m_P95History.clear();
+        m_P99History.clear();
         m_ThroughputHistory.clear();
     }
 
@@ -153,6 +170,8 @@ private:
     std::chrono::steady_clock::time_point m_LastUpdate = std::chrono::steady_clock::now();
 
     mutable std::mutex m_HistoryMutex;
-    std::vector<float> m_LatencyHistory;
+    std::vector<float> m_P50History;
+    std::vector<float> m_P95History;
+    std::vector<float> m_P99History;
     std::vector<float> m_ThroughputHistory;
 };
