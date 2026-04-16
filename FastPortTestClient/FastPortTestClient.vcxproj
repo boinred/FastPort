@@ -76,9 +76,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FastPortTestClient.cpp" />
+    <ClCompile Include="TestClientApp.ixx" />
     <ClCompile Include="MetricsCollector.ixx" />
     <ClCompile Include="TestSession.ixx" />
     <ClCompile Include="TestRunner.ixx" />
+    <ClCompile Include="ABCompare.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">

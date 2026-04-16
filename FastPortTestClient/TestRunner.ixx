@@ -38,67 +38,133 @@ public:
     {
         if (m_bConnected) return true;
 
-        m_pIOService = std::make_shared<LibNetworks::Services::IOService>();
-        m_pIOService->Start(std::thread::hardware_concurrency());
+        if (!EnsureIOService()) return false;
 
-        auto pMetrics = m_pMetrics;
-        auto logCb = m_LogCallback;
+        auto pSession = ConnectOne(ip, port);
+        if (!pSession) return false;
 
-        auto pOnCreateSession = [pMetrics, logCb](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket)
-            -> std::shared_ptr<LibNetworks::Sessions::OutboundSession>
-            {
-                const size_t bufferSize = 8 * 1024;
-                auto pRecv = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufferSize);
-                auto pSend = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufferSize);
-                auto pSession = std::make_shared<TestSession>(pSocket, std::move(pRecv), std::move(pSend));
-                pSession->SetMetrics(pMetrics);
-                pSession->SetLogCallback(logCb);
-                return pSession;
-            };
-
-        auto pConnector = LibNetworks::Core::IOSocketConnector::Create(
-            m_pIOService, pOnCreateSession, std::string(ip), static_cast<unsigned short>(port));
-
-        if (!pConnector)
-        {
-            return false;
-        }
-
-        m_Connectors.push_back(pConnector);
+        m_Sessions.push_back(pSession);
         m_bConnected = true;
         return true;
     }
 
     void Disconnect()
     {
+        // 1. 진행 중인 테스트 중단
+        m_bFloodRunning = false;
+
+        // 2. 커넥터 해제 (소켓 닫기 → IO 완료 통지 중단)
         for (auto& c : m_Connectors)
         {
             if (c) c->DisConnect();
         }
         m_Connectors.clear();
 
+        // 3. IO 서비스 중지 (워커 스레드 종료 대기)
         if (m_pIOService)
         {
             m_pIOService->Stop();
             m_pIOService.reset();
         }
+
+        // 4. 워커 스레드 종료 후 세션 해제 (use-after-free 방지)
+        m_Sessions.clear();
         m_bConnected = false;
     }
 
     bool IsConnected() const { return m_bConnected; }
 
+    // Design Ref: §3.5 — Echo test (에코 N회)
+    void RunEchoTest(int count)
+    {
+        for (auto& pSession : m_Sessions)
+        {
+            if (pSession) pSession->StartEchoLoop(count);
+        }
+    }
+
+    // Design Ref: §3.5 — Flood test (N초간 최대 속도)
+    void RunFloodTest(int durationSec)
+    {
+        m_bFloodRunning = true;
+        m_FloodThread = std::thread([this, durationSec]()
+        {
+            auto endTime = std::chrono::steady_clock::now() + std::chrono::seconds(durationSec);
+            while (m_bFloodRunning && std::chrono::steady_clock::now() < endTime)
+            {
+                for (auto& pSession : m_Sessions)
+                {
+                    if (pSession) pSession->SendEcho("flood");
+                }
+            }
+            m_bFloodRunning = false;
+        });
+        m_FloodThread.detach();
+    }
+
+    void StopFlood() { m_bFloodRunning = false; }
+    bool IsFloodRunning() const { return m_bFloodRunning; }
+
+    // Design Ref: §3.5 — Generic test state (covers echo + flood)
+    bool IsTestRunning() const
+    {
+        if (m_bFloodRunning) return true;
+        for (auto& pSession : m_Sessions)
+        {
+            if (pSession && pSession->GetEchoCount() > 0) return true;
+        }
+        return false;
+    }
+
+    void StopTest()
+    {
+        m_bFloodRunning = false;
+        // Echo는 세션 단위로 남은 횟수를 소진하므로 별도 중단 불필요
+    }
+
     bool ConnectScale(const char* ip, int port, int count)
+    {
+        if (!EnsureIOService()) return false;
+
+        int success = 0;
+        for (int i = 0; i < count; ++i)
+        {
+            auto pSession = ConnectOne(ip, port);
+            if (pSession)
+            {
+                m_Sessions.push_back(pSession);
+                ++success;
+            }
+        }
+
+        m_bConnected = (success > 0) || m_bConnected;
+        return success > 0;
+    }
+
+    int GetConnectionCount() const { return static_cast<int>(m_Connectors.size()); }
+
+    // 세션 접근 (에코 테스트 등에서 사용)
+    const std::vector<std::shared_ptr<TestSession>>& GetSessions() const { return m_Sessions; }
+
+private:
+    bool EnsureIOService()
     {
         if (!m_pIOService)
         {
             m_pIOService = std::make_shared<LibNetworks::Services::IOService>();
             m_pIOService->Start(std::thread::hardware_concurrency());
         }
+        return m_pIOService != nullptr;
+    }
 
+    std::shared_ptr<TestSession> ConnectOne(const char* ip, int port)
+    {
+        std::shared_ptr<TestSession> result;
         auto pMetrics = m_pMetrics;
         auto logCb = m_LogCallback;
+        auto* pResult = &result;
 
-        auto pOnCreateSession = [pMetrics, logCb](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket)
+        auto pOnCreateSession = [pMetrics, logCb, pResult](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket)
             -> std::shared_ptr<LibNetworks::Sessions::OutboundSession>
             {
                 const size_t bufferSize = 8 * 1024;
@@ -107,31 +173,25 @@ public:
                 auto pSession = std::make_shared<TestSession>(pSocket, std::move(pRecv), std::move(pSend));
                 pSession->SetMetrics(pMetrics);
                 pSession->SetLogCallback(logCb);
+                *pResult = pSession;
                 return pSession;
             };
 
-        int success = 0;
-        for (int i = 0; i < count; ++i)
-        {
-            auto pConnector = LibNetworks::Core::IOSocketConnector::Create(
-                m_pIOService, pOnCreateSession, std::string(ip), static_cast<unsigned short>(port));
-            if (pConnector)
-            {
-                m_Connectors.push_back(pConnector);
-                ++success;
-            }
-        }
+        auto pConnector = LibNetworks::Core::IOSocketConnector::Create(
+            m_pIOService, pOnCreateSession, std::string(ip), static_cast<unsigned short>(port));
 
-        m_bConnected = (success > 0);
-        return m_bConnected;
+        if (!pConnector) return nullptr;
+
+        m_Connectors.push_back(pConnector);
+        return result;
     }
 
-    int GetConnectionCount() const { return static_cast<int>(m_Connectors.size()); }
-
-private:
     MetricsCollector* m_pMetrics = nullptr;
     LogCallback m_LogCallback;
     std::shared_ptr<LibNetworks::Services::IOService> m_pIOService;
     std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> m_Connectors;
+    std::vector<std::shared_ptr<TestSession>> m_Sessions;
     bool m_bConnected = false;
+    std::atomic<bool> m_bFloodRunning = false;
+    std::thread m_FloodThread;
 };
