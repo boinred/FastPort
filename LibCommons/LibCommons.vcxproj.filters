@@ -3,6 +3,8 @@
   <ItemGroup>
     <ClCompile Include="StrConverter.ixx" />
     <ClCompile Include="ThreadPool.ixx" />
+    <ClCompile Include="TimerQueue.ixx" />
+    <ClCompile Include="TimerQueue.cpp" />
     <ClCompile Include="RWLock.ixx" />
     <ClCompile Include="ServiceMode.ixx" />
     <ClCompile Include="SingleTon.ixx" />

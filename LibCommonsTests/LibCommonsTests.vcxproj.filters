@@ -3,5 +3,6 @@
   <ItemGroup>
     <ClCompile Include="CircleBufferQueueTests.cpp" />
     <ClCompile Include="LockBenchmarkTests.cpp" />
+    <ClCompile Include="TimerQueueTests.cpp" />
   </ItemGroup>
 </Project>

@@ -33,6 +33,8 @@
     <ClCompile Include="Container.ixx" />
     <ClCompile Include="StrConverter.ixx" />
     <ClCompile Include="ThreadPool.ixx" />
+    <ClCompile Include="TimerQueue.ixx" />
+    <ClCompile Include="TimerQueue.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
