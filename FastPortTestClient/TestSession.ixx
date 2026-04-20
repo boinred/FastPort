@@ -5,6 +5,8 @@ module;
 #include <WinSock2.h>
 #include <MSWSock.h>
 #include <memory>
+#include <string>
+#include <utility>
 #include <chrono>
 #include <atomic>
 #include <functional>
@@ -87,6 +89,10 @@ public:
         SendMessage(::fastport::protocols::commons::ProtocolId::PROTOCOL_ID_TESTS, request);
     }
 
+    // Design Ref: iosession-lifetime-race §5.2 — Stress echo payload.
+    // Ping-pong 에서 사용할 payload 를 세션별로 지정. 비어있으면 "echo" 기본 사용.
+    void SetEchoPayload(std::string payload) { m_EchoPayload = std::move(payload); }
+
     uint64_t GetEchoCount() const { return m_EchoCount.load(std::memory_order_relaxed); }
 
     void OnConnected() override
@@ -142,7 +148,8 @@ public:
         if (m_RemainingEchos.load(std::memory_order_relaxed) > 0)
         {
             m_RemainingEchos.fetch_sub(1, std::memory_order_relaxed);
-            SendEcho("echo");
+            const char* payload = m_EchoPayload.empty() ? "echo" : m_EchoPayload.c_str();
+            SendEcho(payload);
         }
     }
 
@@ -154,7 +161,8 @@ public:
     void StartEchoLoop(int count)
     {
         m_RemainingEchos = count - 1; // 첫 번째는 바로 전송
-        SendEcho("echo");
+        const char* payload = m_EchoPayload.empty() ? "echo" : m_EchoPayload.c_str();
+        SendEcho(payload);
     }
 
 private:
@@ -169,6 +177,9 @@ private:
     uint32_t m_NextRequestId = 1;
     std::atomic<uint64_t> m_EchoCount = 0;
     std::atomic<int> m_RemainingEchos = 0;
+
+    // Design Ref: iosession-lifetime-race §5.2 — Custom payload (default "echo").
+    std::string m_EchoPayload;
 
     AdminSummaryCallback     m_AdminSummaryCb;
     AdminSessionListCallback m_AdminSessionListCb;

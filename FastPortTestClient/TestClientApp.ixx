@@ -82,6 +82,11 @@ public:
                     RenderAdminPanel();
                     ImGui::EndTabItem();
                 }
+                if (ImGui::BeginTabItem("Stress"))
+                {
+                    RenderStressPanel();
+                    ImGui::EndTabItem();
+                }
                 ImGui::EndTabBar();
             }
         }
@@ -536,6 +541,144 @@ private:
         }
     }
 
+    // Design Ref: iosession-lifetime-race §5.1~§5.3 — Stress mode UI.
+    // Plan SC: FR-10 — 10k conn × 5분 × 100 churn/s reconnect 반복.
+    // 이 UI 는 사용자 trigger 용 — 실제 churn loop 은 TestRunner 내부 스레드.
+    void RenderStressPanel()
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "STRESS REPRODUCER");
+        ImGui::Separator();
+
+        // Design §7 — Stress 는 localhost 전용 도구임을 명시.
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+            "WARNING: Local loopback only. Do not target external servers.");
+        ImGui::Spacing();
+
+        const bool running = m_Runner.IsStressRunning();
+
+        // Inputs — running 중엔 비활성.
+        ImGui::BeginDisabled(running);
+        {
+            ImGui::InputText("Target IP",   m_StressIP, sizeof(m_StressIP));
+            ImGui::InputInt ("Target Port", &m_StressPort);
+            if (m_StressPort < 1)     m_StressPort = 1;
+            if (m_StressPort > 65535) m_StressPort = 65535;
+
+            ImGui::InputInt("Target Conns",     &m_StressTargetConns);
+            if (m_StressTargetConns < 1)    m_StressTargetConns = 1;
+            if (m_StressTargetConns > 50000) m_StressTargetConns = 50000;
+
+            ImGui::InputInt("Churn rate /sec",  &m_StressChurnRate);
+            if (m_StressChurnRate < 0)    m_StressChurnRate = 0;
+            if (m_StressChurnRate > 1000) m_StressChurnRate = 1000;
+
+            ImGui::InputInt("Duration (sec)",   &m_StressDuration);
+            if (m_StressDuration < 10)   m_StressDuration = 10;
+            if (m_StressDuration > 3600) m_StressDuration = 3600;
+
+            ImGui::RadioButton("IOCP", &m_StressServerMode, 0); ImGui::SameLine();
+            ImGui::RadioButton("RIO",  &m_StressServerMode, 1);
+            ImGui::TextDisabled("(UI label — server is a separate process)");
+
+            ImGui::Spacing();
+            // Design Ref: iosession-lifetime-race §5.2 — Echo 트래픽 옵션.
+            // Ping-pong 이 돌아야 push_back 재진입이 발생 → UAF race window 확장.
+            ImGui::Checkbox("Enable Echo Ping-Pong", &m_StressEnableEcho);
+            ImGui::InputInt("Payload Size (bytes)", &m_StressPayloadBytes);
+            if (m_StressPayloadBytes < 1)    m_StressPayloadBytes = 1;
+            if (m_StressPayloadBytes > 8192) m_StressPayloadBytes = 8192;
+            if (ImGui::SmallButton("4 B"))    m_StressPayloadBytes = 4;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("64 B"))   m_StressPayloadBytes = 64;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("1 KB"))   m_StressPayloadBytes = 1024;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("4 KB"))   m_StressPayloadBytes = 4096;
+        }
+        ImGui::EndDisabled();
+
+        ImGui::Spacing();
+
+        if (!running)
+        {
+            if (ImGui::Button("Start Stress", ImVec2(180, 0)))
+            {
+                TestRunner::StressConfig cfg;
+                cfg.targetConns     = m_StressTargetConns;
+                cfg.churnRatePerSec = m_StressChurnRate;
+                cfg.durationSec     = m_StressDuration;
+                cfg.enableEcho      = m_StressEnableEcho;
+                cfg.payloadBytes    = m_StressPayloadBytes;
+                if (m_Runner.StartStressMode(m_StressIP, m_StressPort, cfg))
+                {
+                    char buf[160];
+                    snprintf(buf, sizeof(buf),
+                        "Stress started: %d conns, %d churn/s, %d sec, echo=%s (payload %d B)",
+                        cfg.targetConns, cfg.churnRatePerSec, cfg.durationSec,
+                        cfg.enableEcho ? "on" : "off", cfg.payloadBytes);
+                    Log(buf);
+                }
+                else { Log("Stress start failed (already running?)"); }
+            }
+        }
+        else
+        {
+            if (ImGui::Button("Stop", ImVec2(180, 0)))
+            {
+                m_Runner.StopStressMode();
+                Log("Stress stopped.");
+            }
+        }
+
+        ImGui::Spacing(); ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "LIVE STATS");
+        ImGui::Separator();
+
+        // Design §5.3 체크리스트 7 stat fields.
+        const auto& st = m_Runner.GetStressStats();
+        const auto attempts = st.connectAttempts.load(std::memory_order_relaxed);
+        const auto failures = st.connectFailures.load(std::memory_order_relaxed);
+        const auto accepted = st.totalAccepted.load(std::memory_order_relaxed);
+        const auto churned  = st.churned.load(std::memory_order_relaxed);
+        const int  active   = st.active.load(std::memory_order_relaxed);
+        const int  elapsed  = st.elapsedSec.load(std::memory_order_relaxed);
+        const bool crash    = st.crashSuspected.load(std::memory_order_relaxed);
+
+        ImGui::Text("Connect Attempts : %llu", static_cast<unsigned long long>(attempts));
+        ImGui::Text("Connect Failures : %llu", static_cast<unsigned long long>(failures));
+        ImGui::Text("Total Accepted   : %llu", static_cast<unsigned long long>(accepted));
+        ImGui::Text("Active           : %d",   active);
+        ImGui::Text("Churned          : %llu", static_cast<unsigned long long>(churned));
+        ImGui::Text("Elapsed          : %d / %d sec", elapsed, m_StressDuration);
+        if (crash)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
+                "Crash detected   : Yes (failure rate > 50%%)");
+        }
+        else
+        {
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f),
+                "Crash detected   : None");
+        }
+
+        ImGui::Spacing(); ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "LOG TAIL (last 5)");
+        ImGui::Separator();
+        {
+            std::lock_guard lock(m_LogMutex);
+            const int total = static_cast<int>(m_LogMessages.size());
+            const int start = (total > 5) ? (total - 5) : 0;
+            for (int i = start; i < total; ++i)
+            {
+                ImGui::TextUnformatted(m_LogMessages[i].c_str());
+            }
+            if (total == 0)
+            {
+                ImGui::TextDisabled("(no log yet)");
+            }
+        }
+    }
+
     // bytes 자동 단위 포맷 (B/KB/MB/GB).
     static std::string FormatBytes(uint64_t bytes)
     {
@@ -636,4 +779,16 @@ private:
     bool                                                     m_bAdminSessionListValid { false };
     ::fastport::protocols::admin::AdminStatusSummaryResponse m_AdminSummary;
     ::fastport::protocols::admin::AdminSessionListResponse   m_AdminSessionList;
+
+    // Design Ref: iosession-lifetime-race §5.1, §5.3 — Stress 탭 상태.
+    // 기본값은 Design §8.5 / Plan Q10 의 최종 stress 사양(10k / 100 churn/s / 300s).
+    // 사용자는 smoke test 시 작은 값으로 조정 가능.
+    char                                                     m_StressIP[64]         = "127.0.0.1";
+    int                                                      m_StressPort           = 6628;
+    int                                                      m_StressTargetConns    = 10000;
+    int                                                      m_StressChurnRate      = 100;
+    int                                                      m_StressDuration       = 300;
+    int                                                      m_StressServerMode     = 0;   // 0=IOCP, 1=RIO
+    bool                                                     m_StressEnableEcho     = true;
+    int                                                      m_StressPayloadBytes   = 4;
 };
