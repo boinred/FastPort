@@ -5,10 +5,11 @@ module;
 
 export module iocp_service_mode;
 
-import std; 
+import std;
 import commons.service_mode;
-import networks.core.socket; 
+import networks.core.socket;
 import networks.core.io_socket_acceptor;
+import networks.sessions.idle_checker;  // SessionIdleChecker
 import iocp_inbound_session;
 import commons.buffers.circle_buffer_queue;
 
@@ -30,4 +31,8 @@ private:
     const unsigned short C_LISTEN_PORT = 6628;
     LibNetworks::Core::Socket m_ListenSocket{};
     std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> m_Acceptor{};
+
+    // Design Ref: session-idle-timeout §4.4 — 세션 idle 감지.
+    // OnStarted 에서 생성/Start, OnStopped 또는 OnShutdown 에서 Stop.
+    std::shared_ptr<LibNetworks::Sessions::SessionIdleChecker> m_IdleChecker{};
 };
