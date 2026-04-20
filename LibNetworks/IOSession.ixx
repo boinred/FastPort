@@ -102,13 +102,10 @@ protected:
     // 송신 완료 처리
     virtual void OnSent(size_t bytesSent) {}
 
-private:
-    // 송신 큐 적재 및 비동기 송신 트리거.
-    void SendBuffer(std::span<const std::byte> data);
-
-    void ReadReceivedBuffers();
-
+protected:
     // IOCP용 OVERLAPPED 확장 컨텍스트.
+    // protected: 서브클래스(테스트용 TestableIOSession 등)가 OnIOCompleted 를 시뮬레이션할 때
+    //            이 Overlapped 주소가 필요 — OnIOCompleted 는 pOverlapped 주소로 Recv/Send 구분.
     struct OverlappedEx
     {
         OVERLAPPED Overlapped{};
@@ -129,8 +126,16 @@ private:
         }
     };
 
+    // 수신/송신 Overlapped — protected 로 서브클래스가 OnIOCompleted 호출 시 주소 접근 가능.
+    OverlappedEx m_RecvOverlapped{};
+    OverlappedEx m_SendOverlapped{};
+
 private:
-    
+    // 송신 큐 적재 및 비동기 송신 트리거.
+    void SendBuffer(std::span<const std::byte> data);
+
+    void ReadReceivedBuffers();
+
     // Recv 요청 공통 구현
     bool RequestRecv(bool bZeroByte);
 
@@ -138,12 +143,6 @@ private:
     bool TryPostSendFromQueue();
 
 private:
-
-    // 수신용 OVERLAPPED 컨텍스트
-    OverlappedEx m_RecvOverlapped{};
-
-    // 송신용 OVERLAPPED 컨텍스트
-    OverlappedEx m_SendOverlapped{};
 
     // 수신 outstanding 중복 방지 플래그.
     std::atomic_bool m_RecvInProgress = false;

@@ -157,6 +157,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="AdminPacketHandlerTests.cpp" />
+    <ClCompile Include="AdminProtocolTests.cpp" />
+    <ClCompile Include="IOSessionBytesTests.cpp" />
     <ClCompile Include="LibNetworksTests.cpp" />
     <ClCompile Include="PacketFramerTests.cpp" />
     <ClCompile Include="RioBufferManagerTests.cpp" />
@@ -164,7 +167,9 @@
     <ClCompile Include="RioFoundationTests.cpp" />
     <ClCompile Include="RioServiceTests.cpp" />
     <ClCompile Include="RioSessionTests.cpp" />
+    <ClCompile Include="ServerStatsCollectorTests.cpp" />
     <ClCompile Include="SessionIdleCheckerTests.cpp" />
+    <ClCompile Include="StatsSamplerTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">
