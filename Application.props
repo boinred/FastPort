@@ -2,7 +2,11 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup />
+  <PropertyGroup>
+    <!-- vcpkg manifest mode: 빌드 후 종속 DLL(abseil_dll, libprotobuf* 등)을 앱 출력 폴더로 자동 복사. -->
+    <VcpkgApplocalDeps>true</VcpkgApplocalDeps>
+    <VcpkgUseStatic>false</VcpkgUseStatic>
+  </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
