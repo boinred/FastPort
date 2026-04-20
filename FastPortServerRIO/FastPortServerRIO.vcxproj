@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{c2f2bb10-c6d8-4b4a-9157-6d0b5902852e}</ProjectGuid>
-    <RootNamespace>FastPortServer</RootNamespace>
+    <ProjectGuid>{e5e76d03-feb8-4a11-9071-5af445037f37}</ProjectGuid>
+    <RootNamespace>FastPortServerRIO</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -134,11 +134,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="IOCPInboundSession.cpp" />
-    <ClCompile Include="IOCPInboundSession.ixx" />
-    <ClCompile Include="FastPortServer.cpp" />
-    <ClCompile Include="IOCPServiceMode.cpp" />
-    <ClCompile Include="IOCPServiceMode.ixx" />
+    <ClCompile Include="FastPortServerRIO.cpp" />
+    <ClCompile Include="RIOInboundSession.cpp" />
+    <ClCompile Include="RIOInboundSession.ixx" />
+    <ClCompile Include="RIOServiceMode.cpp" />
+    <ClCompile Include="RIOServiceMode.ixx" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">
