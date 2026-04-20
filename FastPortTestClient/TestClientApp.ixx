@@ -11,6 +11,7 @@ module;
 #include <mutex>
 #include <chrono>
 #include <functional>
+#include "Protocols/Admin.pb.h"
 
 export module test_client.app;
 
@@ -32,6 +33,20 @@ public:
         m_Runner.SetMetrics(&m_Metrics);
         m_Runner.SetLogCallback(m_LogCallback);
         m_ABCompare.SetLogCallback(m_LogCallback);
+
+        // Design Ref: server-status §5.2 — Admin 응답 수신 콜백 등록.
+        m_Runner.SetAdminSummaryCallback(
+            [this](const ::fastport::protocols::admin::AdminStatusSummaryResponse& res) {
+                std::lock_guard lock(m_AdminMutex);
+                m_AdminSummary = res;
+                m_bAdminSummaryValid = true;
+            });
+        m_Runner.SetAdminSessionListCallback(
+            [this](const ::fastport::protocols::admin::AdminSessionListResponse& res) {
+                std::lock_guard lock(m_AdminMutex);
+                m_AdminSessionList = res;
+                m_bAdminSessionListValid = true;
+            });
     }
 
     void Render()
@@ -48,13 +63,27 @@ public:
 
         ImGui::SameLine();
 
-        // Right panel: Metrics + Charts + Log
+        // Right panel: Tabs (Metrics / Admin)
         ImGui::BeginChild("Main", ImVec2(0, 0), false);
         {
             if (m_bABMode && m_ABCompare.IsRunning())
+            {
                 RenderABComparePanel();
-            else
-                RenderMetricsPanel(snap);
+            }
+            else if (ImGui::BeginTabBar("MainTabs"))
+            {
+                if (ImGui::BeginTabItem("Metrics"))
+                {
+                    RenderMetricsPanel(snap);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Admin"))
+                {
+                    RenderAdminPanel();
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
         }
         ImGui::EndChild();
     }
@@ -381,6 +410,163 @@ private:
         }
     }
 
+    // Design Ref: server-status §5.1, §5.2 — Admin 탭 UI.
+    // Summary 는 1Hz 폴링 (체크박스 ON 일 때). SessionList 는 Refresh 버튼 클릭 시만.
+    void RenderAdminPanel()
+    {
+        // 폴링 주기 (1Hz) — 마지막 요청 시각 기준.
+        const auto now = std::chrono::steady_clock::now();
+        if (m_bAdminPolling && m_Runner.IsConnected())
+        {
+            if (now - m_LastAdminPoll >= std::chrono::seconds(1))
+            {
+                m_Runner.SendAdminSummaryRequest();
+                m_LastAdminPoll = now;
+            }
+        }
+
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "SERVER STATUS");
+        ImGui::Separator();
+
+        ImGui::Checkbox("Poll Enabled (1 Hz)", &m_bAdminPolling);
+        if (!m_Runner.IsConnected())
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f),
+                "Not connected. Connect to a server first.");
+            return;
+        }
+
+        ::fastport::protocols::admin::AdminStatusSummaryResponse summary;
+        bool haveSummary = false;
+        {
+            std::lock_guard lock(m_AdminMutex);
+            if (m_bAdminSummaryValid)
+            {
+                summary = m_AdminSummary;
+                haveSummary = true;
+            }
+        }
+
+        if (!haveSummary)
+        {
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
+                "Waiting for first response...");
+        }
+        else
+        {
+            // Summary 그리드
+            const char* modeStr = "Unknown";
+            switch (summary.server_mode())
+            {
+            case ::fastport::protocols::admin::SERVER_MODE_IOCP: modeStr = "IOCP"; break;
+            case ::fastport::protocols::admin::SERVER_MODE_RIO:  modeStr = "RIO";  break;
+            default: break;
+            }
+            ImGui::Text("Server Mode       : %s", modeStr);
+            ImGui::Text("Uptime            : %s",  FormatUptime(summary.server_uptime_ms()).c_str());
+            ImGui::Text("Active Sessions   : %u", summary.active_session_count());
+            ImGui::Text("Total RX          : %s", FormatBytes(summary.total_rx_bytes()).c_str());
+            ImGui::Text("Total TX          : %s", FormatBytes(summary.total_tx_bytes()).c_str());
+            ImGui::Text("Idle Disconnects  : %llu",
+                static_cast<unsigned long long>(summary.idle_disconnect_count()));
+            ImGui::Text("Process Memory    : %s", FormatBytes(summary.process_memory_bytes()).c_str());
+            ImGui::Text("Process CPU       : %.2f %%", summary.process_cpu_percent());
+            ImGui::Text("Server Timestamp  : %llu ms",
+                static_cast<unsigned long long>(summary.server_timestamp_ms()));
+        }
+
+        ImGui::Spacing(); ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "SESSION LIST");
+        ImGui::Separator();
+
+        ImGui::InputInt("Offset", &m_AdminOffset);
+        if (m_AdminOffset < 0) m_AdminOffset = 0;
+        ImGui::InputInt("Limit",  &m_AdminLimit);
+        if (m_AdminLimit < 1) m_AdminLimit = 1;
+        if (m_AdminLimit > 1000) m_AdminLimit = 1000;
+
+        if (ImGui::Button("Refresh Sessions", ImVec2(200, 0)))
+        {
+            m_Runner.SendAdminSessionListRequest(
+                static_cast<uint32_t>(m_AdminOffset),
+                static_cast<uint32_t>(m_AdminLimit));
+        }
+
+        ::fastport::protocols::admin::AdminSessionListResponse listRes;
+        bool haveList = false;
+        {
+            std::lock_guard lock(m_AdminMutex);
+            if (m_bAdminSessionListValid)
+            {
+                listRes = m_AdminSessionList;
+                haveList = true;
+            }
+        }
+
+        if (haveList)
+        {
+            ImGui::Text("Total : %u   Offset : %u   Shown : %d",
+                listRes.total(), listRes.offset(), listRes.sessions_size());
+
+            if (ImGui::BeginTable("Sessions", 4,
+                ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
+                ImVec2(0, 300)))
+            {
+                ImGui::TableSetupColumn("ID");
+                ImGui::TableSetupColumn("LastRecv (ms)");
+                ImGui::TableSetupColumn("RX");
+                ImGui::TableSetupColumn("TX");
+                ImGui::TableHeadersRow();
+
+                for (int i = 0; i < listRes.sessions_size(); ++i)
+                {
+                    const auto& s = listRes.sessions(i);
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0); ImGui::Text("%llu",
+                        static_cast<unsigned long long>(s.session_id()));
+                    ImGui::TableSetColumnIndex(1); ImGui::Text("%lld",
+                        static_cast<long long>(s.last_recv_ms()));
+                    ImGui::TableSetColumnIndex(2); ImGui::Text("%s",
+                        FormatBytes(s.rx_bytes()).c_str());
+                    ImGui::TableSetColumnIndex(3); ImGui::Text("%s",
+                        FormatBytes(s.tx_bytes()).c_str());
+                }
+                ImGui::EndTable();
+            }
+        }
+    }
+
+    // bytes 자동 단위 포맷 (B/KB/MB/GB).
+    static std::string FormatBytes(uint64_t bytes)
+    {
+        const char* units[] = { "B", "KB", "MB", "GB", "TB" };
+        int idx = 0;
+        double v = static_cast<double>(bytes);
+        while (v >= 1024.0 && idx < 4)
+        {
+            v /= 1024.0;
+            ++idx;
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.2f %s", v, units[idx]);
+        return buf;
+    }
+
+    // ms → HH:MM:SS 포맷.
+    static std::string FormatUptime(uint64_t ms)
+    {
+        const uint64_t totalSec = ms / 1000ULL;
+        const uint64_t h = totalSec / 3600ULL;
+        const uint64_t m = (totalSec % 3600ULL) / 60ULL;
+        const uint64_t s = totalSec % 60ULL;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%02llu:%02llu:%02llu",
+            static_cast<unsigned long long>(h),
+            static_cast<unsigned long long>(m),
+            static_cast<unsigned long long>(s));
+        return buf;
+    }
+
     void RenderSessionLog()
     {
         ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "SESSION LOG");
@@ -439,4 +625,15 @@ private:
     std::mutex m_LogMutex;
     std::deque<std::string> m_LogMessages;
     static constexpr size_t MAX_LOG_LINES = 200;
+
+    // Design Ref: server-status §5.2 — Admin 탭 상태.
+    bool                                                     m_bAdminPolling { true };
+    std::chrono::steady_clock::time_point                    m_LastAdminPoll {};
+    int                                                      m_AdminOffset   { 0 };
+    int                                                      m_AdminLimit    { 100 };
+    std::mutex                                               m_AdminMutex;
+    bool                                                     m_bAdminSummaryValid     { false };
+    bool                                                     m_bAdminSessionListValid { false };
+    ::fastport::protocols::admin::AdminStatusSummaryResponse m_AdminSummary;
+    ::fastport::protocols::admin::AdminSessionListResponse   m_AdminSessionList;
 };

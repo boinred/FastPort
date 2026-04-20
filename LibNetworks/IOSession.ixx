@@ -12,6 +12,7 @@ export module networks.sessions.io_session;
 
 import networks.sessions.inetwork_session;
 import networks.sessions.iidle_aware;
+import networks.sessions.isession_stats;
 import networks.core.io_consumer;
 import networks.core.socket;
 import networks.core.packet;
@@ -27,6 +28,7 @@ namespace LibNetworks::Sessions
 export class IOSession : public Core::IIOConsumer,
                           public INetworkSession,
                           public IIdleAware,
+                          public ISessionStats,
                           public std::enable_shared_from_this<IOSession>
 {
 public:
@@ -61,6 +63,16 @@ public:
     std::int64_t GetLastRecvTimeMs() const noexcept override
     {
         return m_LastRecvTimeMs.load(std::memory_order_relaxed);
+    }
+
+    // Design Ref: server-status §3.3 — ISessionStats 구현.
+    std::uint64_t GetTotalRxBytes() const noexcept override
+    {
+        return m_TotalRxBytes.load(std::memory_order_relaxed);
+    }
+    std::uint64_t GetTotalTxBytes() const noexcept override
+    {
+        return m_TotalTxBytes.load(std::memory_order_relaxed);
     }
 
     // Design Ref: session-idle-timeout §4.2 — 사유 파라미터 오버로드.
@@ -145,6 +157,11 @@ private:
     // 0 은 아직 수신 이력 없음. OnIOCompleted 의 Real Recv 성공 경로(bytes > 0) 에서 갱신.
     // Thread-safety: relaxed atomic — tick 콜백과 수신 스레드에서 concurrent 접근.
     std::atomic<std::int64_t> m_LastRecvTimeMs = 0;
+
+    // Design Ref: server-status §3.3, §4.2 — 누적 바이트 카운터.
+    // OnIOCompleted 의 수신/송신 성공 경로에서 relaxed atomic fetch_add.
+    std::atomic<std::uint64_t> m_TotalRxBytes { 0 };
+    std::atomic<std::uint64_t> m_TotalTxBytes { 0 };
 
     // 세션 소켓 핸들
     std::shared_ptr<Core::Socket> m_pSocket = {};

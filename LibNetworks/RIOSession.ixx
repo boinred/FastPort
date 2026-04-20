@@ -12,6 +12,7 @@
 export module networks.sessions.rio_session;
 
 import networks.sessions.inetwork_session;
+import networks.sessions.isession_stats;
 import networks.core.rio_extension;
 import networks.core.rio_context;
 import networks.core.rio_buffer_manager;
@@ -27,7 +28,9 @@ namespace LibNetworks::Sessions
  * RIO (Registered I/O) 기반 네트워크 세션 (Client에서는 사용하지 않고 Server 전용)
  * C1001 에러 방지를 위해 상속 구조 단순화
  */
-export class RIOSession : public INetworkSession, public std::enable_shared_from_this<RIOSession>
+export class RIOSession : public INetworkSession,
+                          public ISessionStats,
+                          public std::enable_shared_from_this<RIOSession>
 {
 public:
     // 세션 생성자
@@ -57,6 +60,16 @@ public:
 
     // 연결 상태 확인
     bool IsConnected() const { return !m_bIsDisconnected.load(); }
+
+    // Design Ref: server-status §3.3 — ISessionStats 구현.
+    std::uint64_t GetTotalRxBytes() const noexcept override
+    {
+        return m_TotalRxBytes.load(std::memory_order_relaxed);
+    }
+    std::uint64_t GetTotalTxBytes() const noexcept override
+    {
+        return m_TotalTxBytes.load(std::memory_order_relaxed);
+    }
 
 protected:
     // 패킷 수신 이벤트 처리
@@ -119,6 +132,10 @@ private:
     uint64_t m_SessionId = m_NextSessionId.fetch_add(1, std::memory_order_relaxed);
     // 다음 세션 ID
     inline static std::atomic<uint64_t> m_NextSessionId = 1;
+
+    // Design Ref: server-status §3.3, §4.2 — 누적 바이트 카운터 (RIO 완료 경로에서 갱신).
+    std::atomic<std::uint64_t> m_TotalRxBytes { 0 };
+    std::atomic<std::uint64_t> m_TotalTxBytes { 0 };
 };
 
 } // namespace LibNetworks::Sessions

@@ -16,13 +16,36 @@ module;
 #include <windows.h>
 #include <spdlog/spdlog.h>
 #include <thread>
+#include <chrono>
 
 module rio_service_mode;
 
 import std;
 import commons.logger;
+import commons.container;
+import commons.singleton;
 import networks.core.rio_extension;
 import networks.sessions.inetwork_session;
+import networks.sessions.rio_session;
+import networks.sessions.isession_stats;
+
+
+// RIO 세션 컨테이너. RIOInboundSession.cpp 와 동일 타입이어야 SingleTon 공유.
+using RIOSessionContainer = LibCommons::Container<
+    uint64_t,
+    std::shared_ptr<LibNetworks::Sessions::RIOSession>>;
+
+
+// 전역 AdminPacketHandler 액세스 포인트 (RIO 서버용).
+namespace
+{
+std::atomic<LibNetworks::Admin::AdminPacketHandler*> g_pRIOAdminHandler { nullptr };
+}
+
+LibNetworks::Admin::AdminPacketHandler* GetGlobalRIOAdminHandler() noexcept
+{
+    return g_pRIOAdminHandler.load(std::memory_order_acquire);
+}
 
 
 void RIOServiceMode::OnStarted()
@@ -86,13 +109,58 @@ void RIOServiceMode::OnStarted()
     m_RioService->Start(1);
 
     m_bRunning = nullptr != m_Acceptor;
+
+    // Design Ref: server-status §4 — Stats Sampler + Collector + Admin Handler 연동 (RIO).
+    using namespace std::chrono_literals;
+    LibNetworks::Stats::SamplerConfig samplerCfg;
+    samplerCfg.tickIntervalMs = 1'000ms;
+    samplerCfg.enabled        = true;
+    m_StatsSampler = std::make_shared<LibNetworks::Stats::StatsSampler>(samplerCfg);
+    m_StatsSampler->Start();
+
+    auto statsSnapshotProvider = []()
+        -> std::vector<std::shared_ptr<LibNetworks::Sessions::ISessionStats>>
+        {
+            std::vector<std::shared_ptr<LibNetworks::Sessions::ISessionStats>> result;
+            auto& container = LibCommons::SingleTon<RIOSessionContainer>::GetInstance();
+            container.ForEach(
+                [&result](uint64_t /*id*/, std::shared_ptr<LibNetworks::Sessions::RIOSession> const& pSession) {
+                    if (pSession) {
+                        result.push_back(
+                            std::static_pointer_cast<LibNetworks::Sessions::ISessionStats>(pSession));
+                    }
+                });
+            return result;
+        };
+
+    // RIO 는 session-idle-timeout 미적용 → IdleCountProvider 는 0 상수.
+    auto idleCountProvider = []() -> std::uint64_t { return 0ULL; };
+
+    m_StatsCollector = std::make_shared<LibNetworks::Stats::ServerStatsCollector>(
+        LibNetworks::Stats::ServerMode::RIO,
+        std::move(statsSnapshotProvider),
+        std::move(idleCountProvider),
+        m_StatsSampler.get());
+
+    m_AdminHandler = std::make_shared<LibNetworks::Admin::AdminPacketHandler>(*m_StatsCollector);
+    g_pRIOAdminHandler.store(m_AdminHandler.get(), std::memory_order_release);
 }
 
 
 void RIOServiceMode::OnStopped()
 {
-    // 서비스 정지 요청 시: RIO 루프 먼저 종료해서 이후 들어오는 완료 이벤트를 차단.
-    // Acceptor 는 OnShutdown 에서 따로 정리.
+    // Admin 전역 포인터 먼저 무효화.
+    g_pRIOAdminHandler.store(nullptr, std::memory_order_release);
+
+    if (m_StatsSampler)
+    {
+        m_StatsSampler->Stop();
+    }
+    m_AdminHandler.reset();
+    m_StatsCollector.reset();
+    m_StatsSampler.reset();
+
+    // RIO 루프 먼저 종료.
     if (m_RioService)
     {
         m_RioService->Stop();
@@ -103,7 +171,16 @@ void RIOServiceMode::OnStopped()
 
 void RIOServiceMode::OnShutdown()
 {
-    // 시스템 종료 이벤트: Acceptor 를 닫아 새 연결 수락을 멈춘다.
+    g_pRIOAdminHandler.store(nullptr, std::memory_order_release);
+
+    if (m_StatsSampler)
+    {
+        m_StatsSampler->Stop();
+    }
+    m_AdminHandler.reset();
+    m_StatsCollector.reset();
+    m_StatsSampler.reset();
+
     if (m_Acceptor)
     {
         m_Acceptor->Shutdown();

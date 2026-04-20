@@ -22,6 +22,7 @@
     <ClCompile Include="InboundSession.cpp" />
     <ClCompile Include="InboundSession.ixx" />
     <ClCompile Include="IIdleAware.ixx" />
+    <ClCompile Include="ISessionStats.ixx" />
     <ClCompile Include="INetworkService.ixx" />
     <ClCompile Include="INetworkSession.ixx" />
     <ClCompile Include="IOConsumer.ixx" />
@@ -49,10 +50,19 @@
     <ClCompile Include="RioExtension.ixx" />
     <ClCompile Include="SessionIdleChecker.cpp" />
     <ClCompile Include="SessionIdleChecker.ixx" />
+    <ClCompile Include="ServerStatsCollector.cpp" />
+    <ClCompile Include="ServerStatsCollector.ixx" />
+    <ClCompile Include="StatsSampler.cpp" />
+    <ClCompile Include="StatsSampler.ixx" />
+    <ClCompile Include="AdminPacketHandler.cpp" />
+    <ClCompile Include="AdminPacketHandler.ixx" />
     <ClCompile Include="Socket.cpp" />
     <ClCompile Include="Socket.ixx" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Protocols\Protocols.vcxproj">
+      <Project>{17dbf54e-3460-402c-a2b0-75ff9cbabcbd}</Project>
+    </ProjectReference>
     <ProjectReference Include="..\LibCommons\LibCommons.vcxproj">
       <Project>{4f7088d5-e65b-4b71-97bf-91019bb758c5}</Project>
     </ProjectReference>

@@ -82,6 +82,27 @@
     <ClCompile Include="IIdleAware.ixx">
       <Filter>Sessions</Filter>
     </ClCompile>
+    <ClCompile Include="ISessionStats.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="ServerStatsCollector.ixx">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="ServerStatsCollector.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="StatsSampler.ixx">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="StatsSampler.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="AdminPacketHandler.ixx">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="AdminPacketHandler.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
     <ClCompile Include="SessionIdleChecker.ixx">
       <Filter>Sessions</Filter>
     </ClCompile>

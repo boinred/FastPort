@@ -31,6 +31,9 @@ import networks.core.socket;
 import networks.core.io_socket_acceptor;
 import networks.services.rio_service;
 import networks.core.rio_buffer_manager;
+import networks.stats.stats_sampler;
+import networks.stats.server_stats_collector;
+import networks.admin.admin_packet_handler;
 import rio_inbound_session;
 
 
@@ -76,4 +79,9 @@ private:
 
     // 프로세스 전역 RIO 버퍼 풀. 새 세션에게 slice 를 할당해 준다.
     std::shared_ptr<LibNetworks::Core::RioBufferManager> m_RioBufferManager{};
+
+    // Design Ref: server-status §4 — Admin 통계/샘플러/핸들러.
+    std::shared_ptr<LibNetworks::Stats::StatsSampler>         m_StatsSampler{};
+    std::shared_ptr<LibNetworks::Stats::ServerStatsCollector> m_StatsCollector{};
+    std::shared_ptr<LibNetworks::Admin::AdminPacketHandler>   m_AdminHandler{};
 };

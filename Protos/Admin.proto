@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+import "Commons.proto";
+package fastport.protocols.admin;
+
+option optimize_for = SPEED;
+
+// Design Ref: server-status §3.1 — 관리 채널용 메시지.
+// Phase 1 무인증 — auth_token 은 proto 에 예약만, 서버는 무시.
+// Packet ID (LibNetworks 쪽 상수): 0x8001~0x8004. 0x8000 대역은 admin 전용 예약.
+
+
+// 서버 모드 enum
+enum ServerMode
+{
+    SERVER_MODE_UNKNOWN = 0;
+    SERVER_MODE_IOCP    = 1;
+    SERVER_MODE_RIO     = 2;
+}
+
+
+// 0x8001 — 서버 Summary 요청. 폴링용 (1Hz 예상).
+message AdminStatusSummaryRequest
+{
+    commons.Header header    = 1;
+    string         auth_token = 2;  // Phase 1: 서버가 무시. Future Work 예약.
+}
+
+
+// 0x8002 — Summary 응답. 숫자 위주 경량 응답.
+message AdminStatusSummaryResponse
+{
+    commons.Header     header                = 1;
+    commons.ResultCode result                = 2;
+
+    uint64             server_uptime_ms      = 3;
+    uint32             active_session_count  = 4;
+    uint64             total_rx_bytes        = 5;
+    uint64             total_tx_bytes        = 6;
+    uint64             idle_disconnect_count = 7;
+    ServerMode         server_mode           = 8;
+    uint64             process_memory_bytes  = 9;    // Windows WorkingSetSize
+    double             process_cpu_percent   = 10;   // 0.0 ~ 100.0 (논리 코어 전체 기준)
+    uint64             server_timestamp_ms   = 11;   // Unix epoch ms (시계 동기 용도)
+}
+
+
+// 0x8003 — 세션 목록 요청. 명시적 요청 시에만 송신.
+message AdminSessionListRequest
+{
+    commons.Header header     = 1;
+    uint32         offset     = 2;  // 0-base
+    uint32         limit      = 3;  // 서버가 1000 으로 clamp
+    string         auth_token = 4;
+}
+
+
+// 세션 1개 정보.
+message AdminSessionInfo
+{
+    uint64 session_id    = 1;
+    int64  last_recv_ms  = 2;  // steady_clock epoch-ms, 0 이면 수신 이력 없음
+    uint64 rx_bytes      = 3;
+    uint64 tx_bytes      = 4;
+}
+
+
+// 0x8004 — 세션 목록 응답. 페이지네이션.
+message AdminSessionListResponse
+{
+    commons.Header             header   = 1;
+    commons.ResultCode         result   = 2;
+    uint32                     total    = 3;   // 전체 활성 세션 수 (필터링 전)
+    uint32                     offset   = 4;   // 요청의 offset (에코)
+    repeated AdminSessionInfo  sessions = 5;
+}

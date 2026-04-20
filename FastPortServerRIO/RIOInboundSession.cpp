@@ -19,6 +19,11 @@ module rio_inbound_session;
 import commons.logger;
 import commons.container;
 import commons.singleton;
+import networks.admin.admin_packet_handler;
+
+
+// RIOServiceMode.cpp 의 전역 핸들러 액세스.
+LibNetworks::Admin::AdminPacketHandler* GetGlobalRIOAdminHandler() noexcept;
 
 
 // 프로세스 전역 세션 컨테이너. id → weak 소유 shared_ptr 매핑.
@@ -98,6 +103,20 @@ void RIOInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPack
 
     // 패킷 ID 기반 dispatch. 신규 패킷 추가 시 여기에 case 확장.
     const auto packetId = rfPacket.GetPacketId();
+
+    // Design Ref: server-status §4.4 — Admin 패킷(0x8xxx) dispatch.
+    if (LibNetworks::Admin::IsAdminPacketId(packetId))
+    {
+        if (auto* pAdmin = GetGlobalRIOAdminHandler())
+        {
+            if (pAdmin->HandlePacket(*this, rfPacket)) return;
+        }
+        LibCommons::Logger::GetInstance().LogWarning("RIOInboundSession",
+            "Admin packet {:#06x} received but handler unavailable. Session Id : {}",
+            packetId, GetSessionId());
+        return;
+    }
+
     switch (packetId)
     {
     case PACKET_ID_BENCHMARK_REQUEST:

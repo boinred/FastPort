@@ -12,6 +12,7 @@ module;
 
 #include "Protocols/Commons.pb.h"
 #include "Protocols/Tests.pb.h"
+#include "Protocols/Admin.pb.h"
 
 export module test_client.test_session;
 
@@ -39,6 +40,37 @@ public:
 
     void SetMetrics(MetricsCollector* pMetrics) { m_pMetrics = pMetrics; }
     void SetLogCallback(LogCallback cb) { m_LogCallback = std::move(cb); }
+
+    // Design Ref: server-status §5.2 — Admin 응답 콜백. AdminPanel 이 등록.
+    using AdminSummaryCallback = std::function<void(const ::fastport::protocols::admin::AdminStatusSummaryResponse&)>;
+    using AdminSessionListCallback = std::function<void(const ::fastport::protocols::admin::AdminSessionListResponse&)>;
+    void SetAdminSummaryCallback(AdminSummaryCallback cb) { m_AdminSummaryCb = std::move(cb); }
+    void SetAdminSessionListCallback(AdminSessionListCallback cb) { m_AdminSessionListCb = std::move(cb); }
+
+    // Admin 요청 송신 — 서버의 0x8001/0x8003 엔드포인트로.
+    void SendAdminSummaryRequest()
+    {
+        ::fastport::protocols::admin::AdminStatusSummaryRequest request;
+        auto pHeader = request.mutable_header();
+        pHeader->set_request_id(m_NextRequestId++);
+        pHeader->set_timestamp_ms(static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count()));
+        SendMessage(0x8001, request);
+    }
+
+    void SendAdminSessionListRequest(uint32_t offset, uint32_t limit)
+    {
+        ::fastport::protocols::admin::AdminSessionListRequest request;
+        auto pHeader = request.mutable_header();
+        pHeader->set_request_id(m_NextRequestId++);
+        pHeader->set_timestamp_ms(static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count()));
+        request.set_offset(offset);
+        request.set_limit(limit);
+        SendMessage(0x8003, request);
+    }
 
     void SendEcho(const char* message)
     {
@@ -73,6 +105,28 @@ public:
 
     void OnPacketReceived(const LibNetworks::Core::Packet& rfPacket) override
     {
+        const auto packetId = rfPacket.GetPacketId();
+
+        // Design Ref: server-status §5.2 — Admin 응답은 콜백으로 전달.
+        if (packetId == 0x8002)
+        {
+            ::fastport::protocols::admin::AdminStatusSummaryResponse response;
+            if (rfPacket.ParseMessage(response) && m_AdminSummaryCb)
+            {
+                m_AdminSummaryCb(response);
+            }
+            return;
+        }
+        if (packetId == 0x8004)
+        {
+            ::fastport::protocols::admin::AdminSessionListResponse response;
+            if (rfPacket.ParseMessage(response) && m_AdminSessionListCb)
+            {
+                m_AdminSessionListCb(response);
+            }
+            return;
+        }
+
         auto recvTime = std::chrono::steady_clock::now();
         double rttMs = std::chrono::duration<double, std::milli>(recvTime - m_LastSendTime).count();
 
@@ -115,4 +169,7 @@ private:
     uint32_t m_NextRequestId = 1;
     std::atomic<uint64_t> m_EchoCount = 0;
     std::atomic<int> m_RemainingEchos = 0;
+
+    AdminSummaryCallback     m_AdminSummaryCb;
+    AdminSessionListCallback m_AdminSessionListCb;
 };

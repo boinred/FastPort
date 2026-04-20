@@ -11,10 +11,14 @@ module;
 
 module iocp_inbound_session;
 import commons.logger;
-import commons.container; 
+import commons.container;
 import commons.singleton;
+import networks.admin.admin_packet_handler;
 
 using SessionContainer = LibCommons::Container<uint64_t, std::shared_ptr<LibNetworks::Sessions::InboundSession>>;
+
+// IOCPServiceMode.cpp 에서 정의한 전역 AdminPacketHandler 액세스 (동일 exe 내).
+LibNetworks::Admin::AdminPacketHandler* GetGlobalIOCPAdminHandler() noexcept;
 
 namespace
 {
@@ -66,6 +70,19 @@ void IOCPInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPac
     __super::OnPacketReceived(rfPacket);
 
     const auto packetId = rfPacket.GetPacketId();
+
+    // Design Ref: server-status §4.4 — Admin 패킷(0x8xxx) dispatch.
+    if (LibNetworks::Admin::IsAdminPacketId(packetId))
+    {
+        if (auto* pAdmin = GetGlobalIOCPAdminHandler())
+        {
+            if (pAdmin->HandlePacket(*this, rfPacket)) return;
+        }
+        LibCommons::Logger::GetInstance().LogWarning("IOCPInboundSession",
+            "Admin packet {:#06x} received but handler unavailable. Session Id : {}",
+            packetId, GetSessionId());
+        return;
+    }
 
     switch (packetId)
     {

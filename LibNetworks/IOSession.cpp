@@ -339,6 +339,9 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
             // bytes > 0 수신 완료 후에만 갱신. Zero-byte Recv 는 수신 이력이 아니므로 제외.
             m_LastRecvTimeMs.store(NowMs(), std::memory_order_relaxed);
 
+            // Design Ref: server-status §3.3 — 누적 수신 바이트.
+            m_TotalRxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
+
             ReadReceivedBuffers();
 
             m_RecvInProgress.store(false);
@@ -366,6 +369,9 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         {
             m_pSendBuffer->Consume(bytesTransferred);
         }
+
+        // Design Ref: server-status §3.3 — 누적 송신 바이트.
+        m_TotalTxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
 
         OnSent(bytesTransferred);
 

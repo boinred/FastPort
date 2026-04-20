@@ -10,6 +10,9 @@ import commons.service_mode;
 import networks.core.socket;
 import networks.core.io_socket_acceptor;
 import networks.sessions.idle_checker;  // SessionIdleChecker
+import networks.stats.stats_sampler;
+import networks.stats.server_stats_collector;
+import networks.admin.admin_packet_handler;
 import iocp_inbound_session;
 import commons.buffers.circle_buffer_queue;
 
@@ -35,4 +38,9 @@ private:
     // Design Ref: session-idle-timeout §4.4 — 세션 idle 감지.
     // OnStarted 에서 생성/Start, OnStopped 또는 OnShutdown 에서 Stop.
     std::shared_ptr<LibNetworks::Sessions::SessionIdleChecker> m_IdleChecker{};
+
+    // Design Ref: server-status §4 — Admin 통계/샘플러/핸들러.
+    std::shared_ptr<LibNetworks::Stats::StatsSampler>           m_StatsSampler{};
+    std::shared_ptr<LibNetworks::Stats::ServerStatsCollector>   m_StatsCollector{};
+    std::shared_ptr<LibNetworks::Admin::AdminPacketHandler>     m_AdminHandler{};
 };

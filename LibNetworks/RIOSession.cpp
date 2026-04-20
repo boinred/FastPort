@@ -276,6 +276,8 @@ void RIOSession::OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::R
         {
             std::lock_guard lock(m_RecvMutex);
             m_pReceiveBuffer->CommitWrite(bytesTransferred);
+            // Design Ref: server-status §3.3 — 누적 수신 바이트.
+            m_TotalRxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
             ReadReceivedBuffers();
             RequestRecv();
         }
@@ -285,6 +287,8 @@ void RIOSession::OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::R
             std::lock_guard lock(m_SendQueueMutex);
             m_pSendBuffer->Consume(bytesTransferred);
             m_bSendInProgress = false;
+            // Design Ref: server-status §3.3 — 누적 송신 바이트.
+            m_TotalTxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
         }
         FlushPendingSendQueue();
         break;

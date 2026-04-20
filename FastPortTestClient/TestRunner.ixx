@@ -146,6 +146,40 @@ public:
     // 세션 접근 (에코 테스트 등에서 사용)
     const std::vector<std::shared_ptr<TestSession>>& GetSessions() const { return m_Sessions; }
 
+    // Design Ref: server-status §5.2 — Admin 요청은 첫 세션(주 연결)을 통해 송신.
+    // Scale 테스트로 늘어난 세션들은 제외 — admin 은 UI 가 하나의 채널로 폴링.
+    bool SendAdminSummaryRequest()
+    {
+        if (m_Sessions.empty() || !m_Sessions.front()) return false;
+        m_Sessions.front()->SendAdminSummaryRequest();
+        return true;
+    }
+
+    bool SendAdminSessionListRequest(uint32_t offset, uint32_t limit)
+    {
+        if (m_Sessions.empty() || !m_Sessions.front()) return false;
+        m_Sessions.front()->SendAdminSessionListRequest(offset, limit);
+        return true;
+    }
+
+    void SetAdminSummaryCallback(TestSession::AdminSummaryCallback cb)
+    {
+        m_AdminSummaryCb = std::move(cb);
+        if (!m_Sessions.empty() && m_Sessions.front())
+        {
+            m_Sessions.front()->SetAdminSummaryCallback(m_AdminSummaryCb);
+        }
+    }
+
+    void SetAdminSessionListCallback(TestSession::AdminSessionListCallback cb)
+    {
+        m_AdminSessionListCb = std::move(cb);
+        if (!m_Sessions.empty() && m_Sessions.front())
+        {
+            m_Sessions.front()->SetAdminSessionListCallback(m_AdminSessionListCb);
+        }
+    }
+
 private:
     bool EnsureIOService()
     {
@@ -163,8 +197,12 @@ private:
         auto pMetrics = m_pMetrics;
         auto logCb = m_LogCallback;
         auto* pResult = &result;
+        // Admin 콜백이 설정된 경우 첫 세션에 주입되도록 클로저로 캡처.
+        const bool isFirst = m_Sessions.empty();
+        auto adminSummaryCb = isFirst ? m_AdminSummaryCb : TestSession::AdminSummaryCallback{};
+        auto adminListCb    = isFirst ? m_AdminSessionListCb : TestSession::AdminSessionListCallback{};
 
-        auto pOnCreateSession = [pMetrics, logCb, pResult](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket)
+        auto pOnCreateSession = [pMetrics, logCb, pResult, adminSummaryCb, adminListCb](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket)
             -> std::shared_ptr<LibNetworks::Sessions::OutboundSession>
             {
                 const size_t bufferSize = 8 * 1024;
@@ -173,6 +211,8 @@ private:
                 auto pSession = std::make_shared<TestSession>(pSocket, std::move(pRecv), std::move(pSend));
                 pSession->SetMetrics(pMetrics);
                 pSession->SetLogCallback(logCb);
+                if (adminSummaryCb) pSession->SetAdminSummaryCallback(adminSummaryCb);
+                if (adminListCb)    pSession->SetAdminSessionListCallback(adminListCb);
                 *pResult = pSession;
                 return pSession;
             };
@@ -194,4 +234,8 @@ private:
     bool m_bConnected = false;
     std::atomic<bool> m_bFloodRunning = false;
     std::thread m_FloodThread;
+
+    // Admin 콜백 보존 — Connect 이후 첫 세션 생성 시 전달.
+    TestSession::AdminSummaryCallback     m_AdminSummaryCb;
+    TestSession::AdminSessionListCallback m_AdminSessionListCb;
 };
