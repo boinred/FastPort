@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClCompile Include="InboundSession.cpp" />
     <ClCompile Include="InboundSession.ixx" />
+    <ClCompile Include="IIdleAware.ixx" />
     <ClCompile Include="INetworkService.ixx" />
     <ClCompile Include="INetworkSession.ixx" />
     <ClCompile Include="IOConsumer.ixx" />

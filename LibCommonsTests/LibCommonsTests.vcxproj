@@ -158,6 +158,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CircleBufferQueueTests.cpp" />
+    <ClCompile Include="ContainerTests.cpp" />
     <ClCompile Include="LockBenchmarkTests.cpp" />
     <ClCompile Include="TimerQueueTests.cpp" />
   </ItemGroup>

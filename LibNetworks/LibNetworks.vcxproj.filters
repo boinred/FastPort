@@ -79,6 +79,9 @@
     <ClCompile Include="INetworkSession.ixx">
       <Filter>Sessions</Filter>
     </ClCompile>
+    <ClCompile Include="IIdleAware.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
     <ClCompile Include="RioContext.ixx">
       <Filter>Core</Filter>
     </ClCompile>

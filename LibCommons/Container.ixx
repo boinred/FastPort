@@ -75,6 +75,33 @@ public:
         return m_Storage.erase(key) > 0;
     }
 
+    // Design Ref: session-idle-timeout §4.1 — read-lock 을 유지한 채 각 엔트리를 콜백에 전달.
+    // 콜백 내부에서 Container 의 Add/Remove/Clear 호출은 write 재진입이 되어 데드락 유발하므로 금지.
+    // 외부 상태(로컬 벡터 등) 에만 기록하거나 스냅샷 수집 용도로 사용.
+    template<typename Fn>
+    void ForEach(Fn&& fn) const
+    {
+        auto lock = ReadLockBlock(m_Lock);
+        for (auto const& [k, v] : m_Storage)
+        {
+            fn(k, v);
+        }
+    }
+
+    // Design Ref: session-idle-timeout §4.1 — 값 복사로 스냅샷 반환.
+    // 호출자는 락 제약 없이 결과 vector 를 자유롭게 처리 가능. 큰 컨테이너는 복사 비용 주의.
+    std::vector<std::pair<Key, T>> Snapshot() const
+    {
+        auto lock = ReadLockBlock(m_Lock);
+        std::vector<std::pair<Key, T>> result;
+        result.reserve(m_Storage.size());
+        for (auto const& [k, v] : m_Storage)
+        {
+            result.emplace_back(k, v);
+        }
+        return result;
+    }
+
     template<typename Predicate>
     size_t RemoveIf(Predicate&& predicate)
     {
