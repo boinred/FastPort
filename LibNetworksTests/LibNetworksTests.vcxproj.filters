@@ -7,5 +7,6 @@
     <ClCompile Include="RioFoundationTests.cpp" />
     <ClCompile Include="RioServiceTests.cpp" />
     <ClCompile Include="RioSessionTests.cpp" />
+    <ClCompile Include="SessionIdleCheckerTests.cpp" />
   </ItemGroup>
 </Project>

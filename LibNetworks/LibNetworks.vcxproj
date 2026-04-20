@@ -47,6 +47,8 @@
     <ClCompile Include="RIOService.ixx" />
     <ClCompile Include="RioExtension.cpp" />
     <ClCompile Include="RioExtension.ixx" />
+    <ClCompile Include="SessionIdleChecker.cpp" />
+    <ClCompile Include="SessionIdleChecker.ixx" />
     <ClCompile Include="Socket.cpp" />
     <ClCompile Include="Socket.ixx" />
   </ItemGroup>

@@ -5,11 +5,13 @@
 #include <vector>
 #include <atomic>
 #include <span>
+#include <cstdint>
 #include <google/protobuf/message.h>
 
 export module networks.sessions.io_session;
 
 import networks.sessions.inetwork_session;
+import networks.sessions.iidle_aware;
 import networks.core.io_consumer;
 import networks.core.socket;
 import networks.core.packet;
@@ -20,7 +22,12 @@ namespace LibNetworks::Sessions
 {
 
 
-export class IOSession : public Core::IIOConsumer, public INetworkSession, public std::enable_shared_from_this<IOSession>
+// Design Ref: session-idle-timeout §3.2, §4.2 — IIdleAware 상속으로 SessionIdleChecker 가
+// 구체 세션 타입을 몰라도 idle 감지 가능하게 만듦.
+export class IOSession : public Core::IIOConsumer,
+                          public INetworkSession,
+                          public IIdleAware,
+                          public std::enable_shared_from_this<IOSession>
 {
 public:
     IOSession() = delete;
@@ -47,6 +54,21 @@ public:
 
     // (Outbound 전용) ConnectEx용 OVERLAPPED 포인터 반환
     virtual OVERLAPPED* GetConnectOverlappedPtr() override { return nullptr; }
+
+    // Design Ref: session-idle-timeout §3.2 — IIdleAware 구현.
+    // steady_clock 기준 epoch-ms. 0 은 수신 이력 없음 (연결 직후).
+    // Thread-safety: relaxed atomic read — 정확도보다 lock-free 성능 우선.
+    std::int64_t GetLastRecvTimeMs() const noexcept override
+    {
+        return m_LastRecvTimeMs.load(std::memory_order_relaxed);
+    }
+
+    // Design Ref: session-idle-timeout §4.2 — 사유 파라미터 오버로드.
+    // IIdleAware::RequestDisconnect 구현. 내부적으로 기존 RequestDisconnect() 경로와 통합.
+    void RequestDisconnect(DisconnectReason reason) override;
+
+    // 기존 호출자(8곳) 호환 — 내부에서 Normal 사유로 delegation.
+    void RequestDisconnect();
 
 protected:
 
@@ -103,9 +125,6 @@ private:
     // 송신 큐 기반 비동기 송신(WSASend) 등록.
     bool TryPostSendFromQueue();
 
-protected:
-    void RequestDisconnect();
-
 private:
 
     // 수신용 OVERLAPPED 컨텍스트
@@ -121,6 +140,11 @@ private:
     std::atomic_bool m_SendInProgress = false;
 
     std::atomic_bool m_DisconnectRequested = false;
+
+    // Design Ref: session-idle-timeout §3, §4.2 — 마지막 수신 시각 (steady_clock epoch-ms).
+    // 0 은 아직 수신 이력 없음. OnIOCompleted 의 Real Recv 성공 경로(bytes > 0) 에서 갱신.
+    // Thread-safety: relaxed atomic — tick 콜백과 수신 스레드에서 concurrent 접근.
+    std::atomic<std::int64_t> m_LastRecvTimeMs = 0;
 
     // 세션 소켓 핸들
     std::shared_ptr<Core::Socket> m_pSocket = {};

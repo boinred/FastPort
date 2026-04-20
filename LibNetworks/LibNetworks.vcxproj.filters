@@ -82,6 +82,12 @@
     <ClCompile Include="IIdleAware.ixx">
       <Filter>Sessions</Filter>
     </ClCompile>
+    <ClCompile Include="SessionIdleChecker.ixx">
+      <Filter>Sessions</Filter>
+    </ClCompile>
+    <ClCompile Include="SessionIdleChecker.cpp">
+      <Filter>Sessions</Filter>
+    </ClCompile>
     <ClCompile Include="RioContext.ixx">
       <Filter>Core</Filter>
     </ClCompile>

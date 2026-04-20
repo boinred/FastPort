@@ -7,6 +7,8 @@
 #include <vector>
 #include <string>
 #include <span>
+#include <chrono>
+#include <cstdint>
 
 module networks.sessions.io_session;
 
@@ -18,6 +20,18 @@ import networks.core.socket;
 
 namespace LibNetworks::Sessions
 {
+
+namespace
+{
+// Design Ref: session-idle-timeout §4.2 — steady_clock 기준 epoch-ms.
+// idle 비교의 기준 시간. wall clock 대신 steady_clock 사용으로 시스템 시각 변경 영향 없음.
+inline std::int64_t NowMs() noexcept
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+} // anonymous namespace
+
 
 IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
@@ -321,6 +335,10 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
                 return;
             }
 
+            // Design Ref: session-idle-timeout §3, §4.2 — 생존 증거 기록.
+            // bytes > 0 수신 완료 후에만 갱신. Zero-byte Recv 는 수신 이력이 아니므로 제외.
+            m_LastRecvTimeMs.store(NowMs(), std::memory_order_relaxed);
+
             ReadReceivedBuffers();
 
             m_RecvInProgress.store(false);
@@ -397,7 +415,16 @@ void IOSession::ReadReceivedBuffers()
     }
 }
 
+// Design Ref: session-idle-timeout §4.2 — 기존 호출자(8곳) 호환을 위한 무인자 버전.
+// 내부적으로 Normal 사유로 delegation. 신규 호출부는 가능한 reason 명시 버전 사용 권장.
 void IOSession::RequestDisconnect()
+{
+    RequestDisconnect(DisconnectReason::Normal);
+}
+
+// Design Ref: session-idle-timeout §4.2, §6.3 — 이중 호출 방지 CAS + 사유별 로그.
+// IdleChecker 가 tick 콜백에서 직접 호출. m_DisconnectRequested 로 race 안전.
+void IOSession::RequestDisconnect(DisconnectReason reason)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
@@ -407,9 +434,21 @@ void IOSession::RequestDisconnect()
         return;
     }
 
+    // Idle 감지 시에만 idle duration 부가 로그. 다른 사유는 간단히.
+    if (reason == DisconnectReason::IdleTimeout)
+    {
+        const std::int64_t lastMs = m_LastRecvTimeMs.load(std::memory_order_relaxed);
+        const std::int64_t idleMs = (lastMs > 0) ? (NowMs() - lastMs) : -1;
+        logger.LogInfo("IOSession",
+            "IdleTimeout detected. Session Id : {}, IdleMs : {}",
+            GetSessionId(), idleMs);
+    }
+
     if (!m_pSocket)
     {
-        logger.LogWarning("IOSession", "RequestDisconnect() Socket is null. Session Id : {}", GetSessionId());
+        logger.LogWarning("IOSession",
+            "RequestDisconnect() Socket is null. Session Id : {}, Reason : {}",
+            GetSessionId(), static_cast<int>(reason));
         OnDisconnected();
         return;
     }
@@ -431,7 +470,9 @@ void IOSession::RequestDisconnect()
         m_pSendBuffer->Clear();
     }
 
-    logger.LogInfo("IOSession", "RequestDisconnect() Socket closed. Session Id : {}", GetSessionId());
+    logger.LogInfo("IOSession",
+        "RequestDisconnect() Socket closed. Session Id : {}, Reason : {}",
+        GetSessionId(), static_cast<int>(reason));
 
     OnDisconnected();
 }
