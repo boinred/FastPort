@@ -72,13 +72,14 @@ public:
     // 정의가 export 되지 않으므로 외부 소비자는 이 타입으로 어떤 작업도 할 수 없다.
     struct Impl;
 
-private:
-    friend class SingleTon<TimerQueue>;
-
+    // NOTE: 생성자는 public. SingleTon<> 패턴은 GetInstance() 로 공용 인스턴스를 제공하지만,
+    // 독립 인스턴스(예: 단위 테스트에서의 격리, 특정 서브시스템 전용 TimerQueue) 생성도 허용한다.
+    // Logger 처럼 private 으로 두는 것도 가능하지만 testability 와 유연성을 우선.
     TimerQueue();
-
-public:
     ~TimerQueue();
+
+    // Singleton 상속이 friend 필요 — 기본 ctor 를 호출하기 위해.
+    friend class SingleTon<TimerQueue>;
 
     TimerQueue(const TimerQueue&)            = delete;
     TimerQueue& operator=(const TimerQueue&) = delete;
