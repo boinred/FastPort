@@ -137,6 +137,17 @@ void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Mes
     TryPostSendFromQueue();
 }
 
+void IOSession::StartReceiveLoop()
+{
+    bool expected = false;
+    if (!m_ReceiveLoopStarted.compare_exchange_strong(expected, true))
+    {
+        return;
+    }
+
+    RequestReceived();
+}
+
 void IOSession::RequestReceived()
 {
     // 이미 진행 중인지 확인
@@ -154,8 +165,7 @@ void IOSession::RequestReceived()
     }
 }
 
-
-bool IOSession::RequestRecv(bool bZeroByte)
+bool IOSession::PrepareRecvBuffers(bool bZeroByte)
 {
     m_RecvOverlapped.ResetOverlapped();
     m_RecvOverlapped.IsZeroByte = bZeroByte;
@@ -167,31 +177,40 @@ bool IOSession::RequestRecv(bool bZeroByte)
         wsaBuf.buf = nullptr;
         wsaBuf.len = 0;
         m_RecvOverlapped.WSABufs.push_back(wsaBuf);
+        return true;
     }
-    else
+
+    std::vector<std::span<std::byte>> buffers;
+    size_t writableSize = 0;
+    if (m_pReceiveBuffer)
     {
-        std::vector<std::span<std::byte>> buffers;
-        size_t writableSize = 0;
-        if (m_pReceiveBuffer)
-        {
-            writableSize = m_pReceiveBuffer->GetWriteableBuffers(buffers);
-        }
+        writableSize = m_pReceiveBuffer->GetWriteableBuffers(buffers);
+    }
 
-        if (writableSize == 0)
-        {
-            LibCommons::Logger::GetInstance().LogError("IOSession", "PostRecvImpl(Real) Receive buffer full. Session Id : {}", GetSessionId());
-            RequestDisconnect();
-            return false;
-        }
+    if (writableSize == 0)
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "PostRecvImpl(Real) Receive buffer full. Session Id : {}", GetSessionId());
+        RequestDisconnect();
+        return false;
+    }
 
-        m_RecvOverlapped.WSABufs.reserve(buffers.size());
-        for (const auto& span : buffers)
-        {
-            WSABUF wsaBuf{};
-            wsaBuf.buf = reinterpret_cast<char*>(span.data());
-            wsaBuf.len = static_cast<ULONG>(span.size());
-            m_RecvOverlapped.WSABufs.push_back(wsaBuf);
-        }
+    m_RecvOverlapped.WSABufs.reserve(buffers.size());
+    for (const auto& span : buffers)
+    {
+        WSABUF wsaBuf{};
+        wsaBuf.buf = reinterpret_cast<char*>(span.data());
+        wsaBuf.len = static_cast<ULONG>(span.size());
+        m_RecvOverlapped.WSABufs.push_back(wsaBuf);
+    }
+
+    return true;
+}
+
+bool IOSession::RequestRecv(bool bZeroByte)
+{
+    if (!PrepareRecvBuffers(bZeroByte))
+    {
+        return false;
     }
 
     DWORD flags = 0;
@@ -218,6 +237,23 @@ bool IOSession::RequestRecv(bool bZeroByte)
     return true;
 }
 
+void IOSession::PrepareSendBuffers(const std::vector<std::span<const std::byte>>& buffers, size_t bytesToSend)
+{
+    m_SendOverlapped.RequestedBytes = bytesToSend;
+    m_SendOverlapped.ResetOverlapped();
+
+    // WSABUF 배열 구성
+    m_SendOverlapped.WSABufs.clear();
+    m_SendOverlapped.WSABufs.reserve(buffers.size());
+    for (const auto& span : buffers)
+    {
+        WSABUF wsaBuf{};
+        wsaBuf.buf = const_cast<char*>(reinterpret_cast<const char*>(span.data()));
+        wsaBuf.len = static_cast<ULONG>(span.size());
+        m_SendOverlapped.WSABufs.push_back(wsaBuf);
+    }
+}
+
 bool IOSession::TryPostSendFromQueue()
 {
     // Send는 outstanding 1개만 유지
@@ -242,19 +278,7 @@ bool IOSession::TryPostSendFromQueue()
         return true;
     }
 
-    m_SendOverlapped.RequestedBytes = bytesToSend;
-    m_SendOverlapped.ResetOverlapped();
-
-    // WSABUF 배열 구성
-    m_SendOverlapped.WSABufs.clear();
-    m_SendOverlapped.WSABufs.reserve(buffers.size());
-    for (const auto& span : buffers)
-    {
-        WSABUF wsaBuf{};
-        wsaBuf.buf = const_cast<char*>(reinterpret_cast<const char*>(span.data()));
-        wsaBuf.len = static_cast<ULONG>(span.size());
-        m_SendOverlapped.WSABufs.push_back(wsaBuf);
-    }
+    PrepareSendBuffers(buffers, bytesToSend);
 
     DWORD bytesSent = 0;
     int result = ::WSASend(m_pSocket->GetSocket(),
@@ -280,6 +304,101 @@ bool IOSession::TryPostSendFromQueue()
     return true;
 }
 
+void IOSession::HandleZeroByteRecvCompletion(DWORD bytesTransferred)
+{
+    if (bytesTransferred == 0)
+    {
+        if (!RequestRecv(false))
+        {
+            m_RecvInProgress.store(false);
+            RequestDisconnect();
+        }
+        return;
+    }
+
+    m_RecvInProgress.store(false);
+}
+
+void IOSession::HandleRealRecvCompletion(DWORD bytesTransferred)
+{
+    if (bytesTransferred == 0)
+    {
+        m_RecvInProgress.store(false);
+        LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv 0 byte (Real). Disconnected. Session Id : {}", GetSessionId());
+        RequestDisconnect();
+        return;
+    }
+
+    // Zero-Copy Recv Commit
+    if (!m_pReceiveBuffer->CommitWrite(bytesTransferred))
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() CommitWrite failed (Overflow?). Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
+        m_RecvInProgress.store(false);
+        RequestDisconnect();
+        return;
+    }
+
+    // Design Ref: session-idle-timeout §3, §4.2 — 생존 증거 기록.
+    // bytes > 0 수신 완료 후에만 갱신. Zero-byte Recv 는 수신 이력이 아니므로 제외.
+    m_LastRecvTimeMs.store(NowMs(), std::memory_order_relaxed);
+
+    // Design Ref: server-status §3.3 — 누적 수신 바이트.
+    m_TotalRxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
+
+    ReadReceivedBuffers();
+
+    m_RecvInProgress.store(false);
+    RequestReceived();
+}
+
+void IOSession::HandleRecvCompletion(bool bSuccess, DWORD bytesTransferred)
+{
+    if (!bSuccess)
+    {
+        m_RecvInProgress.store(false);
+        LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
+        RequestDisconnect();
+        return;
+    }
+
+    if (m_RecvOverlapped.IsZeroByte)
+    {
+        HandleZeroByteRecvCompletion(bytesTransferred);
+        return;
+    }
+
+    HandleRealRecvCompletion(bytesTransferred);
+}
+
+void IOSession::HandleSendCompletion(bool bSuccess, DWORD bytesTransferred)
+{
+    m_SendInProgress.store(false);
+
+    if (!bSuccess)
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Send failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
+        RequestDisconnect();
+        return;
+    }
+
+    // 전송 완료된 만큼 버퍼 비우기 (Delayed Consume)
+    if (m_pSendBuffer)
+    {
+        m_pSendBuffer->Consume(bytesTransferred);
+    }
+
+    // Design Ref: server-status §3.3 — 누적 송신 바이트.
+    m_TotalTxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
+
+    OnSent(bytesTransferred);
+
+    const bool hasPending = m_pSendBuffer && (m_pSendBuffer->CanReadSize() > 0);
+    if (hasPending)
+    {
+        TryPostSendFromQueue();
+    }
+}
+
 void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped)
 {
     if (!pOverlapped)
@@ -290,98 +409,13 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
     // 멤버 Overlapped 주소로 구분
     if (pOverlapped == &(m_RecvOverlapped.Overlapped))
     {
-        if (!bSuccess)
-        {
-            m_RecvInProgress.store(false);
-            LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
-            RequestDisconnect();
-            return;
-        }
-
-        // 1. Zero-byte Recv 완료 처리
-        if (m_RecvOverlapped.IsZeroByte)
-        {
-            if (bytesTransferred == 0)
-            {
-                if (!RequestRecv(false))
-                {
-                    m_RecvInProgress.store(false);
-                    RequestDisconnect();
-                }
-                return;
-            }
-            else
-            {
-                m_RecvInProgress.store(false);
-                return;
-            }
-        }
-        else // 2. Real Recv 완료 처리
-        {
-            if (bytesTransferred == 0)
-            {
-                m_RecvInProgress.store(false);
-                LibCommons::Logger::GetInstance().LogInfo("IOSession", "OnIOCompleted() Recv 0 byte (Real). Disconnected. Session Id : {}", GetSessionId());
-                RequestDisconnect();
-                return;
-            }
-
-            // Zero-Copy Recv Commit
-            if (!m_pReceiveBuffer->CommitWrite(bytesTransferred))
-            {
-                LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() CommitWrite failed (Overflow?). Session Id : {}, Bytes : {}", GetSessionId(), bytesTransferred);
-                m_RecvInProgress.store(false);
-                RequestDisconnect();
-                return;
-            }
-
-            // Design Ref: session-idle-timeout §3, §4.2 — 생존 증거 기록.
-            // bytes > 0 수신 완료 후에만 갱신. Zero-byte Recv 는 수신 이력이 아니므로 제외.
-            m_LastRecvTimeMs.store(NowMs(), std::memory_order_relaxed);
-
-            // Design Ref: server-status §3.3 — 누적 수신 바이트.
-            m_TotalRxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
-
-            ReadReceivedBuffers();
-
-            m_RecvInProgress.store(false);
-            RequestReceived();
-
-            return;
-        }
+        HandleRecvCompletion(bSuccess, bytesTransferred);
+        return;
     }
 
     if (pOverlapped == &(m_SendOverlapped.Overlapped))
     {
-        m_SendInProgress.store(false);
-
-        if (!bSuccess)
-        {
-            LibCommons::Logger::GetInstance().LogError("IOSession", "OnIOCompleted() Send failed. Session Id : {}, Error Code : {}", GetSessionId(), GetLastError());
-            RequestDisconnect();
-            return;
-        }
-
-        const size_t requested = m_SendOverlapped.RequestedBytes;
-
-        // 전송 완료된 만큼 버퍼 비우기 (Delayed Consume)
-        if (m_pSendBuffer)
-        {
-            m_pSendBuffer->Consume(bytesTransferred);
-        }
-
-        // Design Ref: server-status §3.3 — 누적 송신 바이트.
-        m_TotalTxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
-
-        OnSent(bytesTransferred);
-
-        const bool hasPending = m_pSendBuffer && (m_pSendBuffer->CanReadSize() > 0);
-
-        if (hasPending)
-        {
-            TryPostSendFromQueue();
-        }
-
+        HandleSendCompletion(bSuccess, bytesTransferred);
         return;
     }
 }

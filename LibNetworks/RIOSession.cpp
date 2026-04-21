@@ -51,9 +51,20 @@ bool RIOSession::Initialize()
         return false;
     }
 
-    RequestRecv();
+    StartReceiveLoop();
 
     return true;
+}
+
+void RIOSession::StartReceiveLoop()
+{
+    bool expected = false;
+    if (!m_bReceiveLoopStarted.compare_exchange_strong(expected, true))
+    {
+        return;
+    }
+
+    RequestRecv();
 }
 
 void RIOSession::RequestRecv()
@@ -298,12 +309,13 @@ void RIOSession::OnRioIOCompleted(bool bSuccess, DWORD bytesTransferred, Core::R
 void RIOSession::OnAccepted()
 {
     LibCommons::Logger::GetInstance().LogInfo("RIOSession", "Session accepted. Session Id : {}", GetSessionId());
-
+    StartReceiveLoop();
 }
 
 void RIOSession::OnConnected()
 {
     LibCommons::Logger::GetInstance().LogInfo("RIOSession", "Session connected. Session Id : {}", GetSessionId());
+    StartReceiveLoop();
 }
 
 void RIOSession::OnDisconnected()

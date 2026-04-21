@@ -76,6 +76,9 @@ protected:
     virtual void OnPacketReceived(const Core::Packet& rfPacket) {}
 
 private:
+    // 세션 활성화 시 최초 1회 receive loop 시작.
+    void StartReceiveLoop();
+
     // RIO 수신 요청
     void RequestRecv();
     // 전송 큐에서 전송 요청 처리
@@ -106,6 +109,8 @@ private:
 
     // 전송 진행 상태
     std::atomic<bool> m_bSendInProgress = false;
+    // 최초 receive loop 시작 중복 방지
+    std::atomic<bool> m_bReceiveLoopStarted = false;
     // 연결 종료 상태
     std::atomic<bool> m_bIsDisconnected = false;
 

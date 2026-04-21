@@ -20,7 +20,7 @@ void InboundSession::OnAccepted()
 {
     LibCommons::Logger::GetInstance().LogInfo("InboundSession", "OnAccepted. Session Id : {}", GetSessionId());
 
-    RequestReceived();
+    StartReceiveLoop();
 }
 
 void InboundSession::OnDisconnected()

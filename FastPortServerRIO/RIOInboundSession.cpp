@@ -74,12 +74,12 @@ RIOInboundSession::~RIOInboundSession()
 
 void RIOInboundSession::OnAccepted()
 {
-    __super::OnAccepted();
-
     // 전역 세션 맵에 등록. shared_from_this 로 자신의 shared_ptr 을 얻어 저장.
     // → 세션은 맵 + IO 콜백 양쪽에서 참조되어 수명이 보장됨.
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
     sessions.Add(GetSessionId(), std::dynamic_pointer_cast<RIOInboundSession>(shared_from_this()));
+
+    __super::OnAccepted();
 
     LibCommons::Logger::GetInstance().LogInfo("RIOInboundSession", "OnAccepted. Session Id : {}", GetSessionId());
 }

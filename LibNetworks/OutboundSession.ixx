@@ -42,6 +42,10 @@ protected:
 
 
 private:
+    bool IsConnectCompletion(const OVERLAPPED* pOverlapped) const;
+    bool FinalizeConnect();
+    void ApplyConnectedSocketOptions();
+
     OVERLAPPED m_ConnectOverlapped;
 
 };

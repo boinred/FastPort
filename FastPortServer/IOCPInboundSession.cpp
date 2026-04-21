@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <utility>
 #include <spdlog/spdlog.h>
@@ -50,11 +50,10 @@ IOCPInboundSession::~IOCPInboundSession()
 
 void IOCPInboundSession::OnAccepted()
 {
-    __super::OnAccepted();
-
-
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
     sessions.Add(GetSessionId(), std::dynamic_pointer_cast<IOCPInboundSession>(shared_from_this()));
+
+    __super::OnAccepted();
 }
 
 void IOCPInboundSession::OnDisconnected()

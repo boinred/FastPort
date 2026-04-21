@@ -83,6 +83,8 @@ public:
     void RequestDisconnect();
 
 protected:
+    // 세션 활성화 시 최초 1회 receive loop 시작.
+    void StartReceiveLoop();
 
     // 연결 종료 이벤트 처리
     virtual void OnDisconnected() override {}
@@ -136,13 +138,31 @@ private:
 
     void ReadReceivedBuffers();
 
+    // Recv용 WSABUF 배열 준비.
+    bool PrepareRecvBuffers(bool bZeroByte);
+
     // Recv 요청 공통 구현
     bool RequestRecv(bool bZeroByte);
+
+    // Send용 WSABUF 배열 준비.
+    void PrepareSendBuffers(const std::vector<std::span<const std::byte>>& buffers, size_t bytesToSend);
 
     // 송신 큐 기반 비동기 송신(WSASend) 등록.
     bool TryPostSendFromQueue();
 
+    // Recv 완료 처리 분기.
+    void HandleRecvCompletion(bool bSuccess, DWORD bytesTransferred);
+	// Zero-byte Recv 완료 처리: 실제 데이터 수신이 아닌, recv loop 지속을 위한 완료 통지 경로.
+    void HandleZeroByteRecvCompletion(DWORD bytesTransferred);
+	// Real Recv 완료 처리: 실제 데이터 수신 경로. bytesTransferred > 0 일 때만 호출.
+    void HandleRealRecvCompletion(DWORD bytesTransferred);
+
+    // Send 완료 처리 분기.
+    void HandleSendCompletion(bool bSuccess, DWORD bytesTransferred);
+
 private:
+    // 활성화 훅에서 최초 receive loop 시작 중복 방지.
+    std::atomic_bool m_ReceiveLoopStarted = false;
 
     // 수신 outstanding 중복 방지 플래그.
     std::atomic_bool m_RecvInProgress = false;

@@ -30,10 +30,10 @@ FastPortOutboundSession::~FastPortOutboundSession()
 
 void FastPortOutboundSession::OnConnected()
 {
-    __super::OnConnected();
-
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
     sessions.Add(GetSessionId(), std::dynamic_pointer_cast<FastPortOutboundSession>(shared_from_this()));
+
+    __super::OnConnected();
 
     std::string msg = "Hello FastPort Server!";
 
