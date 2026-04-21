@@ -1,4 +1,4 @@
-#include "CppUnitTest.h"
+﻿#include "CppUnitTest.h"
 
 import networks.sessions.idle_checker;
 import networks.sessions.iidle_aware;
@@ -65,8 +65,15 @@ TEST_MODULE_INITIALIZE(InitLogger)
 TEST_MODULE_CLEANUP(ShutdownLogger)
 {
     // TimerQueue 먼저 (잔여 tick 이 로그 접근하지 않게), 그 다음 Logger.
-    LibCommons::TimerQueue::GetInstance().Shutdown(/*waitForCallbacks=*/true);
-    LibCommons::Logger::GetInstance().Shutdown();
+    if (auto* pTimerQueue = LibCommons::TimerQueue::TryGetInstance())
+    {
+        pTimerQueue->Shutdown(/*waitForCallbacks=*/true);
+    }
+
+    if (auto* pLogger = LibCommons::Logger::TryGetInstance())
+    {
+        pLogger->Shutdown();
+    }
 }
 
 

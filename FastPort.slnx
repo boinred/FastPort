@@ -35,7 +35,9 @@
   <Project Path="LibCommons/LibCommons.vcxproj" Id="4f7088d5-e65b-4b71-97bf-91019bb758c5" />
   <Project Path="LibCommonsTests/LibCommonsTests.vcxproj" />
   <Project Path="LibNetworks/LibNetworks.vcxproj" Id="82bd6e86-a438-4a32-847c-229e1d77ffa8" />
+  <Project Path="LibNetworksRIO/LibNetworksRIO.vcxproj" Id="7d4ecf6c-0c14-4f6c-9d84-7a2940aab731" />
   <Project Path="LibNetworksTests/LibNetworksTests.vcxproj" />
+  <Project Path="LibNetworksRIOTests/LibNetworksRIOTests.vcxproj" Id="f6924ccb-2ef8-4dd8-95de-49ea0d2f1a21" />
   <Project Path="Protocols/Protocols.vcxproj" Id="17dbf54e-3460-402c-a2b0-75ff9cbabcbd" />
   <Project Path="FastPortTestClient/FastPortTestClient.vcxproj" Id="b2c3d4e5-f6a7-8901-bcde-f12345678901" />
 </Solution>

@@ -31,6 +31,11 @@ public:
         return *m_instance;
     }
 
+    static T* TryGetInstance() noexcept
+    {
+        return m_instance.get();
+    }
+
 
 
 private:
