@@ -86,6 +86,18 @@ protected:
     // # 종료 콜백 단일 발화
     void TryFireOnDisconnected();
 
+    // # 테스트 전용 outstanding 설정
+    void DebugSetOutstandingIoCountForTest(int outstanding) noexcept
+    {
+        m_OutstandingIoCount.store(outstanding, std::memory_order_release);
+    }
+
+    // # 테스트 전용 outstanding 조회
+    int DebugGetOutstandingIoCountForTest() const noexcept
+    {
+        return m_OutstandingIoCount.load(std::memory_order_acquire);
+    }
+
     // 세션 활성화 시 최초 1회 receive loop 시작.
     // # 최초 수신 루프 개시
     void StartReceiveLoop();

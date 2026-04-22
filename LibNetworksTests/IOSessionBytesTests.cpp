@@ -11,6 +11,7 @@
 #include <WinSock2.h>
 #include <memory>
 #include <cstdint>
+#include <atomic>
 
 import networks.sessions.io_session;
 import networks.core.socket;
@@ -28,25 +29,65 @@ class TestableIOSession : public LibNetworks::Sessions::IOSession
 public:
     using LibNetworks::Sessions::IOSession::IOSession;
 
+    // 테스트용 outstanding 을 1 증가시키고 Real Recv 완료를 시뮬레이트.
     // Real Recv 성공 완료를 시뮬레이트. CommitWrite(bytes) → m_TotalRxBytes += bytes.
     void SimulateRealRecvSuccess(DWORD bytes)
     {
+        DebugSetOutstandingIoCountForTest(DebugGetOutstandingIoCountForTest() + 1);
         m_RecvOverlapped.IsZeroByte = false;
         this->OnIOCompleted(true, bytes, &m_RecvOverlapped.Overlapped);
     }
 
+    // 테스트용 outstanding 을 1 증가시키고 Zero-byte Recv 완료를 시뮬레이트.
     // Zero-byte Recv 완료를 시뮬레이트 (bytesTransferred=0). 카운터는 변하지 않아야 함.
     void SimulateZeroByteRecvComplete()
     {
+        DebugSetOutstandingIoCountForTest(DebugGetOutstandingIoCountForTest() + 1);
         m_RecvOverlapped.IsZeroByte = true;
         this->OnIOCompleted(true, 0, &m_RecvOverlapped.Overlapped);
     }
 
+    // 테스트용 outstanding 을 1 증가시키고 Send 완료를 시뮬레이트.
     // Send 완료를 시뮬레이트. m_TotalTxBytes += bytes.
     void SimulateSendSuccess(DWORD bytes)
     {
+        DebugSetOutstandingIoCountForTest(DebugGetOutstandingIoCountForTest() + 1);
         this->OnIOCompleted(true, bytes, &m_SendOverlapped.Overlapped);
     }
+
+    // 기존 outstanding 을 drain 하는 Send completion 을 시뮬레이트.
+    void CompleteSendFromExistingOutstanding(DWORD bytes)
+    {
+        this->OnIOCompleted(true, bytes, &m_SendOverlapped.Overlapped);
+    }
+
+    // 테스트 전용 outstanding 강제 설정.
+    void SetOutstandingIoCountForTest(int outstanding) noexcept
+    {
+        DebugSetOutstandingIoCountForTest(outstanding);
+    }
+
+    // 테스트 전용 outstanding 조회.
+    int GetOutstandingIoCountForTest() const noexcept
+    {
+        return DebugGetOutstandingIoCountForTest();
+    }
+
+    // 테스트 전용 disconnect callback 횟수 조회.
+    int GetDisconnectedCountForTest() const noexcept
+    {
+        return m_DisconnectedCount.load();
+    }
+
+protected:
+    // 테스트 전용 disconnect callback 집계.
+    void OnDisconnected() override
+    {
+        m_DisconnectedCount.fetch_add(1);
+    }
+
+private:
+    std::atomic<int> m_DisconnectedCount { 0 };
 };
 
 
@@ -126,6 +167,70 @@ public:
 
         Assert::AreEqual<std::uint64_t>(600ULL, pSession->GetTotalRxBytes(),
             L"여러 번의 Recv 완료가 누적 합산되어야 함");
+    }
+};
+
+TEST_CLASS(IOSessionLifetimeTests)
+{
+public:
+
+    // LT-Idem-01: zero-pending 상태에서 RequestDisconnect 반복 호출 시 OnDisconnected 는 1회만 fire.
+    TEST_METHOD(RequestDisconnect_Idempotent_ZeroPending_FiresOnce)
+    {
+        auto pSession = MakeSession();
+
+        pSession->RequestDisconnect(LibNetworks::Sessions::DisconnectReason::Server);
+        pSession->RequestDisconnect(LibNetworks::Sessions::DisconnectReason::Normal);
+        pSession->RequestDisconnect(LibNetworks::Sessions::DisconnectReason::IdleTimeout);
+
+        Assert::AreEqual(1, pSession->GetDisconnectedCountForTest(),
+            L"zero-pending disconnect 는 중복 호출돼도 OnDisconnected 가 1회만 fire 되어야 함");
+        Assert::AreEqual(0, pSession->GetOutstandingIoCountForTest(),
+            L"zero-pending disconnect 이후 outstanding 은 0 이어야 함");
+    }
+
+    // LT-Zero-01: pending I/O 가 0 이면 RequestDisconnect 가 즉시 fast path 로 종료 callback 을 fire.
+    TEST_METHOD(RequestDisconnect_ZeroPending_FastPath_FiresImmediately)
+    {
+        auto pSession = MakeSession();
+
+        Assert::AreEqual(0, pSession->GetDisconnectedCountForTest(),
+            L"사전 조건: disconnect callback 은 아직 호출되면 안 됨");
+
+        pSession->RequestDisconnect(LibNetworks::Sessions::DisconnectReason::Server);
+
+        Assert::AreEqual(1, pSession->GetDisconnectedCountForTest(),
+            L"pending 이 0 이면 RequestDisconnect 가 즉시 OnDisconnected 를 fire 해야 함");
+        Assert::AreEqual(0, pSession->GetOutstandingIoCountForTest(),
+            L"fast path 이후 outstanding 은 0 이어야 함");
+    }
+
+    // LT-Drain-01: pending I/O 가 남아 있으면 마지막 completion 전까지는 OnDisconnected 가 fire 되면 안 됨.
+    TEST_METHOD(RequestDisconnect_LastCompletion_FiresAfterDrain)
+    {
+        auto pSession = MakeSession();
+        pSession->SetOutstandingIoCountForTest(2);
+
+        pSession->RequestDisconnect(LibNetworks::Sessions::DisconnectReason::Server);
+
+        Assert::AreEqual(0, pSession->GetDisconnectedCountForTest(),
+            L"pending I/O 가 남아 있으면 RequestDisconnect 직후에는 OnDisconnected 가 fire 되면 안 됨");
+        Assert::AreEqual(2, pSession->GetOutstandingIoCountForTest(),
+            L"disconnect 요청만으로 outstanding 이 즉시 줄어들면 안 됨");
+
+        pSession->CompleteSendFromExistingOutstanding(16);
+
+        Assert::AreEqual(0, pSession->GetDisconnectedCountForTest(),
+            L"마지막 completion 이전에는 OnDisconnected 가 fire 되면 안 됨");
+        Assert::AreEqual(1, pSession->GetOutstandingIoCountForTest(),
+            L"첫 completion 이후 outstanding 은 1 이어야 함");
+
+        pSession->CompleteSendFromExistingOutstanding(16);
+
+        Assert::AreEqual(1, pSession->GetDisconnectedCountForTest(),
+            L"마지막 completion 시점에 OnDisconnected 가 정확히 1회 fire 되어야 함");
+        Assert::AreEqual(0, pSession->GetOutstandingIoCountForTest(),
+            L"drain 완료 후 outstanding 은 0 이어야 함");
     }
 };
 
