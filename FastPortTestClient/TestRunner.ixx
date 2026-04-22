@@ -1,4 +1,4 @@
-// Design Ref: §3.5 — TestRunner (connection + echo/flood/scale tests)
+﻿// Design Ref: §3.5 — TestRunner (connection + echo/flood/scale tests)
 // Plan SC: SC1 (연결), SC3 (스케일 테스트)
 module;
 
@@ -473,12 +473,15 @@ private:
             // 각 세션에 이번 라운드 분량 echo loop 지시.
             std::vector<std::shared_ptr<TestSession>> snapshot = GetConnectedStressSessionsSnapshot();
             std::uint64_t dispatchedSessions = 0;
-            for (auto& s : snapshot)
+            if (cfg.enableEcho)
             {
-                if (!payload.empty()) s->SetEchoPayload(payload);
-                if (s->TryStartEchoLoop(perRound))
+                for (auto& s : snapshot)
                 {
-                    ++dispatchedSessions;
+                    if (!payload.empty()) s->SetEchoPayload(payload);
+                    if (s->TryStartEchoLoop(perRound))
+                    {
+                        ++dispatchedSessions;
+                    }
                 }
             }
 
@@ -565,11 +568,22 @@ private:
         }
     }
 
-    // MetricsCollector 가 설정된 경우에만 수신 패킷 수 반환, 아니면 0.
+    // 스트레스 테스트 전용 수신 패킷 수 합산.
+    // 공용 MetricsCollector 대신 m_StressSessions 각 세션의 개별 카운트를 사용해
+    // 일반 연결 트래픽과 스트레스 트래픽을 분리한다.
     std::uint64_t SnapshotReceivedPackets()
     {
-        if (!m_pMetrics) return 0;
-        return m_pMetrics->GetTotalMessages();
+        std::uint64_t total = 0;
+        std::vector<std::shared_ptr<TestSession>> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(m_StressMutex);
+            snapshot = m_StressSessions;
+        }
+        for (const auto& s : snapshot)
+        {
+            if (s) total += s->GetEchoCount();
+        }
+        return total;
     }
 
     std::size_t CountConnectedStressSessions()
