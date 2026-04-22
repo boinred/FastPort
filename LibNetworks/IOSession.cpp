@@ -549,6 +549,15 @@ void IOSession::ReadReceivedBuffers()
 
     while (true)
     {
+        // # 종료 요청 이후 추가 프레임 처리 차단
+        if (m_DisconnectRequested.load(std::memory_order_acquire))
+        {
+            logger.LogDebug("IOSession",
+                "ReadReceivedBuffers() stopping due to disconnect request. Session Id : {}",
+                GetSessionId());
+            break;
+        }
+
         auto frame = Core::PacketFramer::TryFrameFromBuffer(*m_pReceiveBuffer);
         if (frame.Result == Core::PacketFrameResult::NeedMore)
         {
@@ -566,6 +575,15 @@ void IOSession::ReadReceivedBuffers()
         {
             logger.LogError("IOSession", "ReadReceivedBuffers() Packet frame ok but packet missing. Session Id : {}", GetSessionId());
             RequestDisconnect();
+            break;
+        }
+
+        // # 종료 요청 이후 패킷 콜백 차단
+        if (m_DisconnectRequested.load(std::memory_order_acquire))
+        {
+            logger.LogDebug("IOSession",
+                "ReadReceivedBuffers() dropping packet dispatch due to disconnect request. Session Id : {}",
+                GetSessionId());
             break;
         }
 
