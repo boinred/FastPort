@@ -5,7 +5,7 @@
 > **Project**: FastPort
 > **Author**: An Younggun
 > **Date**: 2026-04-22
-> **Status**: Draft (v0.3)
+> **Status**: Draft (v0.3.1)
 > **Planning Doc**: [iosession-lifetime-race.plan.md](../../01-plan/features/iosession-lifetime-race.plan.md) (v0.3)
 > **Parent Feature**: [iocp-game-server-engine](../../01-plan/features/iocp-game-server-engine.plan.md)
 
@@ -68,43 +68,44 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                  IOCP 경로 (v1 전용, v0.3 패턴)                     │
+│         Target IOCP Session Lifetime Path (post-activation)        │
 │                                                                    │
-│   IOService worker                                                 │
-│   ──────────────                                                   │
-│   GetQueuedCompletionStatus → (key = raw IOSession*)               │
-│       ↓                                                            │
-│   IIOConsumer::OnIOCompleted  ◀── 인터페이스 불변                  │
-│       ↓                                                            │
-│   IOSession::OnIOCompleted                                         │
-│     └ IoCompletionGuard guard{*this}   ← RAII, 함수 종료 시 decrement│
-│       └ fetch_sub(1) → prev==1 && disc → TryFireOnDisconnected()   │
-│                                            │                       │
-│                                            ↓                       │
-│                                   m_bOnDisconnectedFired CAS       │
-│                                            │ (first pass)          │
-│                                            ↓                       │
-│                                   OnDisconnected() (virtual)       │
-│                                            │                       │
-│                                            ↓                       │
-│                                   container.Remove(sessionId)      │
-│                                            │                       │
-│                                            ↓                       │
-│                                   container 의 shared_ptr drop     │
-│                                            │                       │
-│                                            ↓                       │
-│                                   ~IOSession() (결정적)             │
+│  Activation entry (out of main drain path):                        │
+│   - Inbound : Accept 완료 → OnAccepted() → container handoff       │
+│   - Outbound: ConnectEx 완료 → OnConnected() → container handoff   │
 │                                                                    │
-│   IOSession::RequestRecv / TryPostSendFromQueue                    │
-│     ├─ fetch_add(1)                                                │
-│     ├─ ::WSARecv / ::WSASend(...)                                  │
-│     └─ 실패(non-PENDING) 시 fetch_sub(1) + last-check              │
+│  IOService worker                                                  │
+│  ──────────────                                                    │
+│  GetQueuedCompletionStatus → (completion key = raw IIOConsumer*)   │
+│      ↓                                                             │
+│  session-path completion 인 경우                                   │
+│      ↓                                                             │
+│  IOSession::OnIOCompleted                                          │
+│    └ IoCompletionGuard guard{*this}   ← scope-exit decrement       │
+│      └ fetch_sub(1) → prev==1 && disconnectRequested               │
+│                                   ↓                                │
+│                           TryFireOnDisconnected()                  │
+│                                   ↓                                │
+│                      m_bOnDisconnectedFired CAS                    │
+│                                   ↓                                │
+│                      OnDisconnected() (virtual)                    │
+│                                   ↓                                │
+│                      container.Remove(sessionId)                   │
+│                                   ↓                                │
+│                      container owner release                       │
+│                                   ↓                                │
+│                      ~IOSession() (deterministic)                  │
 │                                                                    │
-│   IOSession::RequestDisconnect  (멱등)                             │
-│     ├─ m_bDisconnecting CAS (first pass 만 통과)                    │
-│     ├─ ::shutdown(SD_BOTH)                                         │
-│     ├─ ::closesocket()                                             │
-│     └─ return (async, 호출자 대기 없음)                             │
+│  IOSession::RequestRecv / TryPostSendFromQueue                     │
+│    ├─ fetch_add(1)                                                 │
+│    ├─ ::WSARecv / ::WSASend(...)                                   │
+│    └─ 실패(non-PENDING) 시 fetch_sub(1) + 복구                     │
+│                                                                    │
+│  IOSession::RequestDisconnect (idempotent, async)                  │
+│    ├─ disconnectRequested CAS (first pass only)                    │
+│    ├─ ::shutdown(SD_BOTH)                                          │
+│    ├─ ::closesocket()                                              │
+│    └─ return; remaining completion drain 은 worker path 담당       │
 └────────────────────────────────────────────────────────────────────┘
 
 [RIO 경로 — 본 v1 에서는 변경 없음. v1.1 `riosession-lifetime-race` 로 분리]
@@ -116,26 +117,26 @@
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      IOSession Life-cycle States                    │
 │                                                                     │
-│  state = (OutstandingIoCount, Disconnecting, OnDisconnectedFired)   │
+│  state = (OutstandingIoCount, DisconnectRequested, OnDisconnectedFired) │
 │                                                                     │
-│  S0: Newborn           (0, false, false)                            │
-│       │ accept → container.Add(session)                             │
+│  S0: PreActivation     (0, false, false)                            │
+│       │ inbound : accept 완료                                       │
+│       │ outbound: connect 완료 + transport activation               │
 │       ↓                                                             │
-│  S1: Registered        (0, false, false)                            │
-│       │ first RequestRecv posting                                   │
-│       ↓ fetch_add(1)                                                │
-│  S2: Alive             (N>=1, false, false)                         │
-│       │ OnIOCompleted ×N (자연 반복)                                │
-│       │ posting ↔ completion 사이클로 N 오르내림                    │
+│  S1: Activated         (0, false, false)                            │
+│       │ container handoff 완료                                      │
+│       │ StartReceiveLoop / 앱 트래픽 시작 가능                      │
 │       ↓                                                             │
-│       │   ┌─ RequestDisconnect 진입 (admin / idle / error / user)    │
-│       │   │  m_bDisconnecting CAS (first pass)                      │
-│       │   ↓                                                         │
-│  S3: Disconnecting     (N>=0, true, false)                          │
-│       │ shutdown+close → pending I/O 모두 fail completion 으로 반환 │
-│       │ 각 completion 이 fetch_sub(1)                               │
+│  S2: Active            (N>=0, false, false)                         │
+│       │ posting ↔ completion cycle                                  │
+│       │ RequestDisconnect(admin / idle / error / user)              │
 │       ↓                                                             │
-│  S4: Draining          (0, true, false) ← 전이 직후 (prev==1 감지)   │
+│  S3: DisconnectRequested (N>=0, true, false)                        │
+│       │ shutdown+close 시작                                          │
+│       │ N>0 이면 pending completion drain                           │
+│       │ N==0 이면 zero-pending fast path                            │
+│       ↓                                                             │
+│  S4: DisconnectReady   (0, true, false)                             │
 │       │ TryFireOnDisconnected()                                     │
 │       │ m_bOnDisconnectedFired CAS (first pass)                     │
 │       ↓                                                             │
@@ -148,6 +149,70 @@
 │  S7: Destructed        [~IOSession() 실행 → assert count==0]         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+### 2.2.1 Operational Lifecycle Contract
+
+위 state machine 은 단순히 `counter` 변화만 설명하는 그림이 아니라, **owner / readiness /
+disconnect 책임**을 함께 잠그는 운영 계약으로 해석해야 한다.
+
+#### A. Ownership Handoff
+
+| Phase | Primary Owner | Notes |
+|---|---|---|
+| Constructed / Pre-activation | acceptor / connector / caller | 아직 container 소유가 아니다. 이 구간은 transport 활성화 준비 단계다. |
+| Activated | container | Inbound 는 `OnAccepted()`, Outbound 는 `OnConnected()` 시점에 `shared_from_this()` 로 container 에 handoff 한다. |
+| Disconnecting / Draining | container | owner 는 여전히 container 하나다. pending I/O 만 drain 한다. |
+| Removed | none | `OnDisconnected() -> container.Remove(id)` 이후 마지막 shared_ptr 이 drop 되면 즉시 `~IOSession()` 으로 간다. |
+
+**Rule O1**: steady-state owner 는 항상 container 하나다. acceptor / connector / factory 가
+hand-off 이후 reference 를 오래 쥐고 있으면 deterministic destruction 이 흐려진다.
+
+**Rule O2**: `OnDisconnected()` 는 "정리 콜백"이 아니라 **유일한 제거 진입점**으로 취급한다.
+이 경로 밖에서 임의 Remove / erase 를 호출하는 설계는 금지한다.
+
+#### B. Readiness Is Separate From Lifetime
+
+`alive` 와 `ready-to-send/recv` 는 같은 개념이 아니다.
+
+| Axis | Meaning | Example |
+|---|---|---|
+| Lifetime | 객체가 아직 유효하고 container 가 owner 인가 | `m_OutstandingIoCount`, `m_DisconnectRequested`, `m_bOnDisconnectedFired` 조합 |
+| Readiness | transport activation 이 완료되어 앱 트래픽을 시작해도 되는가 | Outbound 는 `ConnectEx` 완료 + `UpdateConnectContext` + `OnConnected()` 이후 |
+
+**Rule R1**: outbound session 은 `OnConnected()` 이전에 앱 payload 송신을 시작하면 안 된다.
+연결 완료 전 send 가능성은 lifetime 문제가 아니라 readiness 위반이다.
+
+**Rule R2**: inbound / outbound 모두 `StartReceiveLoop()` 시작 시점은 activation 완료 후로
+고정한다. "객체가 살아있다"는 이유만으로 송수신 가능 상태로 간주하지 않는다.
+
+#### C. Disconnect Contract
+
+`RequestDisconnect()` 는 단순 close helper 가 아니라, session 을 `Active -> Disconnecting`
+으로 보내는 **유일한 상태 전이 API**다.
+
+| Phase | Allowed Work | Forbidden Work |
+|---|---|---|
+| Active (`disconnect=false`) | 새 recv/send posting, packet 처리, 상위 feature 트래픽 시작 | 없음 |
+| Disconnecting (`disconnect=true`, `outstanding>0`) | 기존 pending I/O completion drain, final fire 대기 | 새 logical work 시작, 새 app-level send loop 시작, 임의 re-arm |
+| Drained (`disconnect=true`, `outstanding==0`) | `TryFireOnDisconnected()` 1회 | 멤버 재접근, 재등록, 재연결 시도 |
+
+**Rule D1**: `m_DisconnectRequested == true` 이후에는 feature 코드가 새 logical work 를 시작하면
+안 된다. Echo loop, timer callback, retry send, 추가 recv arm 모두 금지다.
+
+**Rule D2**: posting 함수가 disconnect 이후 잘못 호출되더라도, 결과는 "즉시 실패 + counter
+복구"여야 한다. 이를 성공 경로처럼 취급해 session lifetime 을 연장하면 안 된다.
+
+**Rule D3**: `TryFireOnDisconnected()` 를 호출하는 모든 경로는 그 호출을 **마지막 동작**으로
+간주해야 한다. 호출 이후 `this` 접근 가능성을 전제한 코드는 금지한다.
+
+#### D. Practical Mapping In This Repository
+
+- Inbound: acceptor 가 세션을 만들고 `OnAccepted()` 에서 container handoff 후 정상 운용에
+  진입한다.
+- Outbound: connector / caller 가 connect 완료 전까지 임시 owner 이고, `OnConnected()` 에서
+  container handoff 후에만 일반 트래픽을 시작한다.
+- 공통: `RequestDisconnect()` 는 이유와 무관하게 동일한 drain 경로로 합류하고, 마지막
+  completion 또는 pending-zero fast path 에서만 `OnDisconnected()` 가 fire 된다.
 
 ### 2.3 Dependencies
 
@@ -222,11 +287,13 @@ namespace {
 | I1 | `m_OutstandingIoCount >= 0` 항상 | posting 성공 시 +1, completion 시 -1 (RAII 1:1 대응) + posting 실패 시 +1 후 즉시 -1 복구 |
 | I2 | 모든 pending I/O 에 대해 Windows 가 completion 배송 보장 | IOCP semantics (`WSA_IO_PENDING` 또는 `SOCKET_ERROR != WSA_IO_PENDING`). `closesocket()` 후에도 fail completion 배송 보장 |
 | I3 | OnIOCompleted 진입 시 counter 는 항상 >= 1 | posting 성공했으므로 fetch_add 완료 상태 |
-| I4 | `RequestDisconnect` 는 정확히 1회만 shutdown+close 실행 | `m_bDisconnecting.compare_exchange_strong(false, true)` 통과 시에만 |
+| I4 | `RequestDisconnect` 는 정확히 1회만 shutdown+close 실행 | disconnectRequested CAS 첫 통과 시에만 |
 | I5 | `OnDisconnected()` 는 정확히 1회만 호출 | `m_bOnDisconnectedFired.compare_exchange_strong(false, true)` 통과 시에만 |
-| I6 | Last-completion 조건: `fetch_sub(1)` prev == 1 && `m_bDisconnecting == true` | RAII guard 에서 체크 |
+| I6 | Last-completion 조건: `fetch_sub(1)` prev == 1 && disconnectRequested == true | RAII guard 에서 체크 |
 | I7 | `~IOSession` 진입 시 `m_OutstandingIoCount == 0` | container 가 유일한 owner, Remove 는 last-completion 이후에만 |
 | I8 | OnDisconnected 호출은 항상 counter == 0 인 상태에서 발생 | I6 로 조건 성립 확인 후에만 fire |
+| I9 | Outbound app traffic 는 connect readiness 이후에만 시작 | `OnConnected()` 이전에는 payload send 금지 |
+| I10 | disconnectRequested == true 이후에는 새 logical work 시작 금지 | feature/timer/retry 계층 contract 로 보장 |
 
 ---
 
@@ -748,3 +815,4 @@ FastPortTestClient/        ← 이미 완료 (reproducer scope), 변경 없음
 | 0.1 | 2026-04-21 | Initial draft (Option C Pragmatic 선택, Module Map 5개, IOCP+RIO 동시, SelfRetain) | AnYounggun |
 | 0.2 | 2026-04-22 | Plan v0.2 정렬 (RIO 분리, Stress 3 시나리오, parent feature 참조, move-out vs RetainGuard 등가) — **SelfRetain 기반 유지** | An Younggun |
 | **0.3** | **2026-04-22** | **Plan v0.3 정렬 — SelfRetain 패턴 기각. Outstanding I/O Counter + Drain-before-Remove 채택. 단일 owner(container) 원칙. 3개 atomic 멤버(`m_OutstandingIoCount`, `m_bDisconnecting`, `m_bOnDisconnectedFired`). RAII `IoCompletionGuard` (nested). `RequestDisconnect` 비동기 멱등 CAS. `TryFireOnDisconnected` CAS 1회 fire. Zero-byte / Real Recv counter 독립. State machine 다이어그램 §2.2 신설. `UndoOutstandingOnFailure` helper. Destructor paranoid assert. L1 tests LT-01~07 + DT-01~02 (9 tests).** | **An Younggun** |
+| **0.3.1** | **2026-04-22** | **Lifecycle contract 명문화. owner handoff(acceptor/connector -> container), readiness와 lifetime 분리, `RequestDisconnect` 이후 새 logical work 금지 규칙, inbound/outbound 실운영 매핑 추가.** | **An Younggun** |
