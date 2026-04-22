@@ -462,6 +462,7 @@ private:
 
         // round 별 시작 시 metrics baseline 기록.
         const std::uint64_t metricsBaseline = SnapshotReceivedPackets();
+        std::uint64_t cumulativeRoundTarget = metricsBaseline;
 
         for (int r = 1; r <= rounds && m_StressStats.running.load(std::memory_order_acquire); ++r)
         {
@@ -473,17 +474,20 @@ private:
                 std::lock_guard<std::mutex> lock(m_StressMutex);
                 snapshot = m_StressSessions;
             }
+            std::uint64_t dispatchedSessions = 0;
             for (auto& s : snapshot)
             {
                 if (!s) continue;
                 if (!payload.empty()) s->SetEchoPayload(payload);
                 s->StartEchoLoop(perRound);
+                ++dispatchedSessions;
             }
 
             // 라운드 완료 대기: round target 도달 or 60s 타임아웃 (UAF reproducer 상,
-            // 장시간 트래픽이 더 중요하므로 완료 못 해도 타임아웃으로 넘어감).
-            const std::uint64_t roundTarget =
-                metricsBaseline + static_cast<std::uint64_t>(r) * static_cast<std::uint64_t>(perRound);
+            // 장시간 트래픽이 더 중요하므로 완료 못 해도 타임아웃으로 넘어감.
+            // round target 은 "이번 라운드에서 실제 echo 를 시작한 세션 수"를 반영해 누적.
+            cumulativeRoundTarget += dispatchedSessions * static_cast<std::uint64_t>(perRound);
+            const std::uint64_t roundTarget = cumulativeRoundTarget;
             const auto roundTimeout = steady_clock::now() + seconds(60);
 
             while (m_StressStats.running.load(std::memory_order_acquire)
