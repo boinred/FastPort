@@ -557,7 +557,7 @@ private:
     std::uint64_t SnapshotReceivedPackets()
     {
         if (!m_pMetrics) return 0;
-        return m_pMetrics->GetSnapshot().TotalMessages;
+        return m_pMetrics->GetTotalMessages();
     }
 
     // 단일 연결 시도 (stress). 성공/실패 counter 업데이트.

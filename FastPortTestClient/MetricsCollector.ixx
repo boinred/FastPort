@@ -48,6 +48,12 @@ public:
             m_ActiveConnections.fetch_sub(1, std::memory_order_relaxed);
     }
 
+    // 부작용(Side-effect) 없는 전체 메시지 수 조회 (모든 스레드에서 안전)
+    uint64_t GetTotalMessages() const
+    {
+        return m_TotalMessages.load(std::memory_order_relaxed);
+    }
+
     // GUI 스레드에서 매 프레임 호출
     Snapshot GetSnapshot()
     {
