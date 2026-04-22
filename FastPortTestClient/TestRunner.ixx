@@ -34,31 +34,53 @@ export class TestRunner
 public:
     using LogCallback = std::function<void(const char*)>;
 
-    // Design Ref: iosession-lifetime-race §5 — Stress reproducer.
-    // Plan SC: FR-10 — 10k conn × 5분 × 100 churn/s reconnect 반복.
-    struct StressConfig
+    // Design Ref: iosession-lifetime-race §5 — Stress reproducer (v0.2 — 3 시나리오).
+    // Plan v0.2 FR-10 — Scenario A (Churn 10k×5min) + B (Burst 1M×2) + C (Combined 1k×100pps×5min).
+    enum class StressScenario : int
     {
-        int targetConns     = 10000;
-        int churnRatePerSec = 100;
-        int durationSec     = 300;
-
-        // Design Ref: iosession-lifetime-race §5.2 — Echo 트래픽으로 zero-byte↔real
-        // 완료 반복 (push_back 재진입) 을 유발해 race window 극대화.
-        bool enableEcho     = true;
-        int  payloadBytes   = 4;        // 4~8192. build-up 직후 세션별로 ping-pong 시작.
+        Churn    = 0,   // A: 10k 동시 + 100 churn/s × duration
+        Burst    = 1,   // B: N concurrent × 1M packet × 2 round
+        Combined = 2,   // C: 1k conn × ~100 pps × duration
     };
 
-    // Design Ref: iosession-lifetime-race §5.3 Page UI Checklist — 7 stat fields.
+    struct StressConfig
+    {
+        StressScenario scenario = StressScenario::Churn;
+
+        // 공통
+        int  durationSec  = 300;          // A, C 에서 사용
+        bool enableEcho   = true;
+        int  payloadBytes = 4;            // 4~8192
+
+        // Scenario A — Churn
+        int targetConns     = 10000;
+        int churnRatePerSec = 100;
+
+        // Scenario B — Burst (Plan v0.2 — 1M × 2 round)
+        int burstConcurrentSessions = 1;          // 1~8
+        int burstPacketCount        = 1000000;    // round 당 예상 수신 패킷 (집계 목표)
+        int burstRoundCount         = 2;
+
+        // Scenario C — Combined
+        int combinedConnCount     = 1000;
+        int combinedPpsPerSession = 100;   // 참조값 — 실제 페이싱은 echo loop 자연 속도
+    };
+
+    // Design Ref: iosession-lifetime-race §5.4 Page UI Checklist — stat fields.
     struct StressStats
     {
-        std::atomic<std::uint64_t> connectAttempts  { 0 };   // 연결 요청 총 횟수
-        std::atomic<std::uint64_t> connectFailures  { 0 };   // 연결 실패 총 횟수
-        std::atomic<std::uint64_t> totalAccepted    { 0 };   // 연결 성공 누적 (attempts - failures)
-        std::atomic<std::uint64_t> churned          { 0 };   // disconnect + reconnect 사이클 완료 수
-        std::atomic<int>           active           { 0 };   // 현재 살아있는 연결 수
-        std::atomic<int>           elapsedSec       { 0 };   // 경과 시간
+        std::atomic<std::uint64_t> connectAttempts  { 0 };
+        std::atomic<std::uint64_t> connectFailures  { 0 };
+        std::atomic<std::uint64_t> totalAccepted    { 0 };
+        std::atomic<std::uint64_t> churned          { 0 };
+        std::atomic<int>           active           { 0 };
+        std::atomic<int>           elapsedSec       { 0 };
         std::atomic<bool>          running          { false };
-        std::atomic<bool>          crashSuspected   { false }; // 연결 실패 스파이크 감지 시 true
+        std::atomic<bool>          crashSuspected   { false };
+
+        // v0.2 — Scenario B/C 용 진행 스냅샷. metrics 기반 파생값.
+        std::atomic<std::uint64_t> packetsReceived  { 0 };
+        std::atomic<int>           currentRound     { 0 };   // Scenario B: 1..roundCount
     };
 
     TestRunner() = default;
@@ -231,6 +253,8 @@ public:
         m_StressStats.active.store(0, std::memory_order_relaxed);
         m_StressStats.elapsedSec.store(0, std::memory_order_relaxed);
         m_StressStats.crashSuspected.store(false, std::memory_order_relaxed);
+        m_StressStats.packetsReceived.store(0, std::memory_order_relaxed);
+        m_StressStats.currentRound.store(0, std::memory_order_relaxed);
         m_StressStats.running.store(true, std::memory_order_release);
 
         std::string ipCopy(ip);
@@ -317,9 +341,22 @@ private:
         return res.session;
     }
 
-    // Design Ref: iosession-lifetime-race §5.2 — Stress main loop.
-    // Phase 1: target 연결 수 빌드업 (100/tick 페이싱). Phase 2: churn 반복.
+    // Design Ref: iosession-lifetime-race §5 — Stress scenario dispatcher (v0.2).
+    // A/B/C 시나리오 별 main loop 를 분기 호출. running 플래그는 여기서 일괄 해제.
     void StressMain(std::string ip, int port, StressConfig cfg)
+    {
+        switch (cfg.scenario)
+        {
+        case StressScenario::Churn:    StressMain_Churn(ip, port, cfg);    break;
+        case StressScenario::Burst:    StressMain_Burst(ip, port, cfg);    break;
+        case StressScenario::Combined: StressMain_Combined(ip, port, cfg); break;
+        }
+        m_StressStats.running.store(false, std::memory_order_release);
+    }
+
+    // Design Ref: iosession-lifetime-race §5.2 Scenario A — Churn.
+    // Phase 1: target 연결 수 빌드업 (100/tick 페이싱). Phase 2: churn 반복.
+    void StressMain_Churn(std::string ip, int port, StressConfig cfg)
     {
         using namespace std::chrono;
         const auto startTime = steady_clock::now();
@@ -385,7 +422,142 @@ private:
         }
 
         // Phase 3: 자연 종료 (연결 유지 — 사용자가 StopStressMode 호출 시 cleanup).
-        m_StressStats.running.store(false, std::memory_order_release);
+        // running flag 는 dispatcher (StressMain) 에서 일괄 해제.
+    }
+
+    // Design Ref: iosession-lifetime-race §5.2 Scenario B — Burst 1M × N round.
+    // burstConcurrentSessions 개 세션을 유지하며, 각 라운드마다 echo loop 시작.
+    // 라운드 완료 판정: metrics 의 누적 packet 수가 round target 에 도달하거나,
+    // round timeout (60 초) 도달 시. UAF 관찰이 목표이므로 정확한 pacing 불요.
+    void StressMain_Burst(std::string ip, int port, StressConfig cfg)
+    {
+        using namespace std::chrono;
+        const auto startTime = steady_clock::now();
+
+        const int sessions = (std::max)(1, (std::min)(cfg.burstConcurrentSessions, 8));
+        const int rounds   = (std::max)(1, cfg.burstRoundCount);
+        const int perRound = (std::max)(1, cfg.burstPacketCount);
+
+        // Echo payload 준비.
+        const std::string payload =
+            (cfg.enableEcho && cfg.payloadBytes > 0)
+                ? BuildPayload(cfg.payloadBytes)
+                : std::string{};
+        m_StressPayload = payload;
+        m_StressEnableEcho = cfg.enableEcho;
+
+        // Phase 1: N sessions 빌드업.
+        for (int i = 0; i < sessions && m_StressStats.running.load(std::memory_order_acquire); ++i)
+        {
+            TryStressConnect(ip.c_str(), port);
+        }
+
+        // round 별 시작 시 metrics baseline 기록.
+        const std::uint64_t metricsBaseline = SnapshotReceivedPackets();
+
+        for (int r = 1; r <= rounds && m_StressStats.running.load(std::memory_order_acquire); ++r)
+        {
+            m_StressStats.currentRound.store(r, std::memory_order_relaxed);
+
+            // 각 세션에 이번 라운드 분량 echo loop 지시.
+            std::vector<std::shared_ptr<TestSession>> snapshot;
+            {
+                std::lock_guard<std::mutex> lock(m_StressMutex);
+                snapshot = m_StressSessions;
+            }
+            for (auto& s : snapshot)
+            {
+                if (!s) continue;
+                if (!payload.empty()) s->SetEchoPayload(payload);
+                s->StartEchoLoop(perRound);
+            }
+
+            // 라운드 완료 대기: round target 도달 or 60s 타임아웃 (UAF reproducer 상,
+            // 장시간 트래픽이 더 중요하므로 완료 못 해도 타임아웃으로 넘어감).
+            const std::uint64_t roundTarget =
+                metricsBaseline + static_cast<std::uint64_t>(r) * static_cast<std::uint64_t>(perRound);
+            const auto roundTimeout = steady_clock::now() + seconds(60);
+
+            while (m_StressStats.running.load(std::memory_order_acquire)
+                && steady_clock::now() < roundTimeout)
+            {
+                const std::uint64_t received = SnapshotReceivedPackets();
+                m_StressStats.packetsReceived.store(received - metricsBaseline, std::memory_order_relaxed);
+                m_StressStats.elapsedSec.store(
+                    static_cast<int>(duration_cast<seconds>(steady_clock::now() - startTime).count()),
+                    std::memory_order_relaxed);
+
+                if (received >= roundTarget) break;
+                std::this_thread::sleep_for(milliseconds(100));
+            }
+        }
+
+        // 자연 종료 — 사용자가 StopStressMode 호출 시 cleanup. running flag 는 dispatcher 에서 해제.
+    }
+
+    // Design Ref: iosession-lifetime-race §5.2 Scenario C — Combined.
+    // 1k conn 빌드업 + 세션별 echo loop + durationSec 동안 유지.
+    // 정확한 PPS 페이싱은 목표 아님 — 세션 수 × echo 자연속도로 대량 트래픽 유지.
+    void StressMain_Combined(std::string ip, int port, StressConfig cfg)
+    {
+        using namespace std::chrono;
+        const auto startTime = steady_clock::now();
+
+        const int targetConns = (std::max)(1, (std::min)(cfg.combinedConnCount, 50000));
+
+        const std::string payload =
+            (cfg.enableEcho && cfg.payloadBytes > 0)
+                ? BuildPayload(cfg.payloadBytes)
+                : std::string{};
+        m_StressPayload = payload;
+        m_StressEnableEcho = cfg.enableEcho;
+
+        // Phase 1: Build-up (100 / 10ms 페이싱).
+        const int buildBatch = 100;
+        const auto batchInterval = milliseconds(10);
+        int built = 0;
+        while (built < targetConns && m_StressStats.running.load(std::memory_order_acquire))
+        {
+            const int n = (std::min)(buildBatch, targetConns - built);
+            for (int i = 0; i < n; ++i) { TryStressConnect(ip.c_str(), port); }
+            built += n;
+
+            m_StressStats.elapsedSec.store(
+                static_cast<int>(duration_cast<seconds>(steady_clock::now() - startTime).count()),
+                std::memory_order_relaxed);
+
+            const auto attempts = m_StressStats.connectAttempts.load(std::memory_order_relaxed);
+            const auto failures = m_StressStats.connectFailures.load(std::memory_order_relaxed);
+            if (attempts > 100 && failures * 2 > attempts)
+            {
+                m_StressStats.crashSuspected.store(true, std::memory_order_relaxed);
+            }
+
+            std::this_thread::sleep_for(batchInterval);
+        }
+
+        if (cfg.enableEcho) { StartEchoOnAllStressSessions(); }
+
+        // Phase 2: 유지 단계 — durationSec 동안 살아있는 세션 유지 + metrics 추적.
+        const auto endTime = startTime + seconds(cfg.durationSec);
+        const std::uint64_t metricsBaseline = SnapshotReceivedPackets();
+        while (m_StressStats.running.load(std::memory_order_acquire)
+            && steady_clock::now() < endTime)
+        {
+            const std::uint64_t received = SnapshotReceivedPackets();
+            m_StressStats.packetsReceived.store(received - metricsBaseline, std::memory_order_relaxed);
+            m_StressStats.elapsedSec.store(
+                static_cast<int>(duration_cast<seconds>(steady_clock::now() - startTime).count()),
+                std::memory_order_relaxed);
+            std::this_thread::sleep_for(milliseconds(200));
+        }
+    }
+
+    // MetricsCollector 가 설정된 경우에만 수신 패킷 수 반환, 아니면 0.
+    std::uint64_t SnapshotReceivedPackets()
+    {
+        if (!m_pMetrics) return 0;
+        return m_pMetrics->GetSnapshot().TotalMessages;
     }
 
     // 단일 연결 시도 (stress). 성공/실패 counter 업데이트.
