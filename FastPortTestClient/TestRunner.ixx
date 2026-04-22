@@ -267,6 +267,8 @@ public:
         m_StressStats.running.store(false, std::memory_order_release);
         if (m_StressThread.joinable()) m_StressThread.join();
 
+        m_StressBuildUpDone.store(false, std::memory_order_relaxed);
+
         // 남아있는 stress 연결 정리.
         std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> toDrop;
         {
@@ -345,6 +347,7 @@ private:
     // A/B/C 시나리오 별 main loop 를 분기 호출. running 플래그는 여기서 일괄 해제.
     void StressMain(std::string ip, int port, StressConfig cfg)
     {
+        m_CurrentStressScenario = cfg.scenario;
         switch (cfg.scenario)
         {
         case StressScenario::Churn:    StressMain_Churn(ip, port, cfg);    break;
@@ -352,6 +355,7 @@ private:
         case StressScenario::Combined: StressMain_Combined(ip, port, cfg); break;
         }
         m_StressStats.running.store(false, std::memory_order_release);
+        m_StressBuildUpDone.store(false, std::memory_order_relaxed);
     }
 
     // Design Ref: iosession-lifetime-race §5.2 Scenario A — Churn.
@@ -397,6 +401,7 @@ private:
 
         // Design Ref: iosession-lifetime-race §5.2 — Build-up 완료 시점에 모든 세션
         // ping-pong 시작. Race window 극대화.
+        m_StressBuildUpDone.store(true, std::memory_order_release);
         if (cfg.enableEcho)
         {
             StartEchoOnAllStressSessions();
@@ -451,6 +456,9 @@ private:
         {
             TryStressConnect(ip.c_str(), port);
         }
+        
+        // 빌드업 완료. Burst 는 라운드 루프가 echo 를 제어하므로 자동 시작 방지.
+        m_StressBuildUpDone.store(true, std::memory_order_release);
 
         // round 별 시작 시 metrics baseline 기록.
         const std::uint64_t metricsBaseline = SnapshotReceivedPackets();
@@ -536,6 +544,7 @@ private:
             std::this_thread::sleep_for(batchInterval);
         }
 
+        m_StressBuildUpDone.store(true, std::memory_order_release);
         if (cfg.enableEcho) { StartEchoOnAllStressSessions(); }
 
         // Phase 2: 유지 단계 — durationSec 동안 살아있는 세션 유지 + metrics 추적.
@@ -573,18 +582,27 @@ private:
             return;
         }
 
-        // Echo payload 주입. Build-up 단계에서는 플래그만 설정 (실제 echo 시작은
-        // StressMain build-up 완료 후 일괄). Churn reconnect 는 즉시 echo 시작.
-        const bool startImmediately = m_StressStats.active.load(std::memory_order_relaxed) > 0
-                                    && m_StressEnableEcho;
+        // Echo payload 주입.
         if (res.session && !m_StressPayload.empty())
         {
             res.session->SetEchoPayload(m_StressPayload);
         }
-        if (startImmediately && res.session)
+
+        // Churn reconnect 등의 상황에서 즉시 echo 시작 여부 결정.
+        // 빌드업 중에는 시나리오별로 StartEchoOnAllStressSessions() 나 라운드 루프가
+        // 시작을 제어하므로 여기서 자동 시작하지 않음.
+        const bool shouldAutoStart = m_StressBuildUpDone.load(std::memory_order_acquire)
+                                   && m_StressEnableEcho;
+
+        if (shouldAutoStart && res.session)
         {
-            // 이미 build-up 이후 — churn 으로 새로 연결된 세션이면 바로 ping-pong 시작.
-            res.session->StartEchoLoop((std::numeric_limits<int>::max)());
+            // Burst 시나리오인 경우 Churn(재연결)이 발생하더라도 개별 세션이 
+            // 무한 루프를 도는 것은 라운드 제어와 충돌할 수 있음.
+            // 하지만 현재 Burst 는 Churn 이 없으므로 안전.
+            if (m_CurrentStressScenario != StressScenario::Burst)
+            {
+                res.session->StartEchoLoop((std::numeric_limits<int>::max)());
+            }
         }
 
         std::lock_guard<std::mutex> lock(m_StressMutex);
@@ -675,4 +693,6 @@ private:
     // Echo payload (공유). Build-up 시 결정, churn reconnect 에도 재사용.
     std::string                                                        m_StressPayload;
     bool                                                               m_StressEnableEcho { true };
+    std::atomic<bool>                                                  m_StressBuildUpDone { false };
+    StressScenario                                                     m_CurrentStressScenario { StressScenario::Churn };
 };
