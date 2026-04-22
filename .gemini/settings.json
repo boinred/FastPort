@@ -1,5 +1,8 @@
 {
-    "general": {
-        "previewFeatures": true
-    }
+  "general": {
+    "previewFeatures": true
+  },
+  "experimental": {
+    "enableAgents": true
+  }
 }

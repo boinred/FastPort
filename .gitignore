@@ -420,3 +420,6 @@ GEMINI.md
 .claude/
 .bkit/
 .bkit-memory.json
+
+# Gemini CLI
+.gemini/
