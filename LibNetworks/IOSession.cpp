@@ -491,6 +491,15 @@ void IOSession::HandleSendCompletion(bool bSuccess, DWORD bytesTransferred)
     // Design Ref: server-status §3.3 — 누적 송신 바이트.
     m_TotalTxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
 
+    // # 종료 요청 이후 상위 송신 콜백 차단
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        LibCommons::Logger::GetInstance().LogDebug("IOSession",
+            "HandleSendCompletion() skipping OnSent due to disconnect request. Session Id : {}",
+            GetSessionId());
+        return;
+    }
+
     OnSent(bytesTransferred);
 
     const bool hasPending = m_pSendBuffer && (m_pSendBuffer->CanReadSize() > 0);
