@@ -456,7 +456,9 @@ private:
         {
             TryStressConnect(ip.c_str(), port);
         }
-        
+
+        WaitForConnectedStressSessions(static_cast<std::size_t>(sessions), startTime, seconds(5));
+
         // 빌드업 완료. Burst 는 라운드 루프가 echo 를 제어하므로 자동 시작 방지.
         m_StressBuildUpDone.store(true, std::memory_order_release);
 
@@ -469,18 +471,15 @@ private:
             m_StressStats.currentRound.store(r, std::memory_order_relaxed);
 
             // 각 세션에 이번 라운드 분량 echo loop 지시.
-            std::vector<std::shared_ptr<TestSession>> snapshot;
-            {
-                std::lock_guard<std::mutex> lock(m_StressMutex);
-                snapshot = m_StressSessions;
-            }
+            std::vector<std::shared_ptr<TestSession>> snapshot = GetConnectedStressSessionsSnapshot();
             std::uint64_t dispatchedSessions = 0;
             for (auto& s : snapshot)
             {
-                if (!s) continue;
                 if (!payload.empty()) s->SetEchoPayload(payload);
-                s->StartEchoLoop(perRound);
-                ++dispatchedSessions;
+                if (s->TryStartEchoLoop(perRound))
+                {
+                    ++dispatchedSessions;
+                }
             }
 
             // 라운드 완료 대기: round target 도달 or 60s 타임아웃 (UAF reproducer 상,
@@ -571,6 +570,52 @@ private:
     {
         if (!m_pMetrics) return 0;
         return m_pMetrics->GetTotalMessages();
+    }
+
+    std::size_t CountConnectedStressSessions()
+    {
+        std::size_t count = 0;
+        std::lock_guard<std::mutex> lock(m_StressMutex);
+        for (const auto& session : m_StressSessions)
+        {
+            if (session && session->IsConnected())
+            {
+                ++count;
+            }
+        }
+        return count;
+    }
+
+    std::vector<std::shared_ptr<TestSession>> GetConnectedStressSessionsSnapshot()
+    {
+        std::vector<std::shared_ptr<TestSession>> snapshot;
+        std::lock_guard<std::mutex> lock(m_StressMutex);
+        snapshot.reserve(m_StressSessions.size());
+        for (const auto& session : m_StressSessions)
+        {
+            if (session && session->IsConnected())
+            {
+                snapshot.push_back(session);
+            }
+        }
+        return snapshot;
+    }
+
+    void WaitForConnectedStressSessions(std::size_t targetCount,
+                                        std::chrono::steady_clock::time_point startTime,
+                                        std::chrono::steady_clock::duration timeout)
+    {
+        using namespace std::chrono;
+        const auto deadline = steady_clock::now() + timeout;
+        while (m_StressStats.running.load(std::memory_order_acquire)
+            && CountConnectedStressSessions() < targetCount
+            && steady_clock::now() < deadline)
+        {
+            m_StressStats.elapsedSec.store(
+                static_cast<int>(duration_cast<seconds>(steady_clock::now() - startTime).count()),
+                std::memory_order_relaxed);
+            std::this_thread::sleep_for(milliseconds(10));
+        }
     }
 
     // 단일 연결 시도 (stress). 성공/실패 counter 업데이트.

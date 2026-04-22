@@ -94,16 +94,29 @@ public:
     void SetEchoPayload(std::string payload) { m_EchoPayload = std::move(payload); }
 
     uint64_t GetEchoCount() const { return m_EchoCount.load(std::memory_order_relaxed); }
+    bool IsConnected() const noexcept { return m_IsConnected.load(std::memory_order_acquire); }
+    bool TryStartEchoLoop(int count)
+    {
+        if (!IsConnected())
+        {
+            return false;
+        }
+
+        StartEchoLoop(count);
+        return true;
+    }
 
     void OnConnected() override
     {
         __super::OnConnected();
+        m_IsConnected.store(true, std::memory_order_release);
         if (m_pMetrics) m_pMetrics->RecordConnection(true);
         Log("Connected to server");
     }
 
     void OnDisconnected() override
     {
+        m_IsConnected.store(false, std::memory_order_release);
         __super::OnDisconnected();
         if (m_pMetrics) m_pMetrics->RecordConnection(false);
         Log("Disconnected from server");
@@ -177,6 +190,7 @@ private:
     uint32_t m_NextRequestId = 1;
     std::atomic<uint64_t> m_EchoCount = 0;
     std::atomic<int> m_RemainingEchos = 0;
+    std::atomic<bool> m_IsConnected = false;
 
     // Design Ref: iosession-lifetime-race §5.2 — Custom payload (default "echo").
     std::string m_EchoPayload;
