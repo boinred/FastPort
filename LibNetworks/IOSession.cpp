@@ -434,13 +434,20 @@ void IOSession::HandleRealRecvCompletion(DWORD bytesTransferred)
     // Design Ref: server-status §3.3 — 누적 수신 바이트.
     m_TotalRxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
 
+    // # 멱등성 및 Rule D1 준수: 종료 요청 상태라면 상위 레이어로 패킷을 배달하지 않는다.
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        LibCommons::Logger::GetInstance().LogDebug("IOSession",
+            "HandleRealRecvCompletion() dropping data dispatch due to disconnect request. Session Id : {}",
+            GetSessionId());
+        m_RecvInProgress.store(false);
+        return;
+    }
+
     ReadReceivedBuffers();
 
     m_RecvInProgress.store(false);
-    if (!m_DisconnectRequested.load(std::memory_order_acquire))
-    {
-        RequestReceived();
-    }
+    RequestReceived();
 }
 
 // # 수신 완료 분기
