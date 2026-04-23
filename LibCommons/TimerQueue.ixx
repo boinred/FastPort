@@ -110,7 +110,7 @@ public:
     void Shutdown(bool waitForCallbacks = true);
 
 private:
-    std::unique_ptr<Impl> m_pImpl;
+    std::shared_ptr<Impl> m_pImpl;
 };
 
 } // namespace LibCommons

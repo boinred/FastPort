@@ -1,4 +1,4 @@
-#include "CppUnitTest.h"
+﻿#include "CppUnitTest.h"
 
 import commons.timer_queue;
 import commons.logger;
@@ -413,6 +413,41 @@ public:
         const int fires = counter.load();
         Assert::IsTrue(fires >= 2, L"Periodic should fire at least 2 times before self-cancel");
         Assert::IsTrue(fires <= 4, L"After self-cancel, additional fires should be limited");
+    }
+
+    // U-20: 콜백 스레드에서 TimerQueue 소멸 시 데드락 없이 빠져나와야 함.
+    BEGIN_TEST_METHOD_ATTRIBUTE(Destructor_SelfDestructInCallback_NoDeadlock)
+        TEST_METHOD_ATTRIBUTE(L"Timeout", L"3000")
+    END_TEST_METHOD_ATTRIBUTE()
+    TEST_METHOD(Destructor_SelfDestructInCallback_NoDeadlock)
+    {
+        auto pQueueBox = std::make_shared<std::unique_ptr<LibCommons::TimerQueue>>(
+            std::make_unique<LibCommons::TimerQueue>());
+        auto pCallbackDone = std::make_shared<std::promise<void>>();
+        auto callbackDone = pCallbackDone->get_future();
+        std::atomic<int> callbackCount { 0 };
+
+        auto id = (*pQueueBox)->ScheduleOnce(
+            30ms,
+            [pQueueBox, pCallbackDone, &callbackCount]() mutable
+            {
+                auto* pQueueStorage = pQueueBox.get();
+                auto* pDone = pCallbackDone.get();
+                callbackCount.fetch_add(1, std::memory_order_relaxed);
+
+                // 콜백 스레드에서 직접 소멸시켜 destructor/shutdown wait 경로를 최소 재현.
+                pQueueStorage->reset();
+                pDone->set_value();
+            },
+            "U20-SelfDestruct");
+
+        Assert::AreNotEqual(LibCommons::kInvalidTimerId, id,
+            L"Self-destruction scenario should schedule successfully");
+
+        const auto status = callbackDone.wait_for(1500ms);
+        Assert::IsTrue(status == std::future_status::ready, L"Destroying TimerQueue from its own callback must not deadlock");
+        Assert::AreEqual(1, callbackCount.load(std::memory_order_relaxed), L"Self-destruction callback should run exactly once");
+        Assert::IsFalse(static_cast<bool>(*pQueueBox), L"Callback should destroy the local TimerQueue instance");
     }
 };
 

@@ -43,6 +43,7 @@ struct TimerJob
 };
 
 struct Entry
+    : std::enable_shared_from_this<Entry>
 {
     TimerId                 id          = kInvalidTimerId;
     PTP_TIMER               handle      = nullptr;
@@ -50,7 +51,26 @@ struct Entry
     std::atomic<EntryState> state       = EntryState::Scheduled;
     bool                    isPeriodic  = false;
     Duration                interval    = Duration::zero();
-    TimerQueue::Impl*       owner       = nullptr;
+    std::atomic_bool        closeAfterCallback = false;
+    std::weak_ptr<TimerQueue::Impl> owner;
+};
+
+thread_local Entry* g_pCurrentCallbackEntry = nullptr;
+
+struct CallbackEntryScope
+{
+    Entry* m_pPrevious = nullptr;
+
+    explicit CallbackEntryScope(Entry* pEntry) noexcept
+        : m_pPrevious(g_pCurrentCallbackEntry)
+    {
+        g_pCurrentCallbackEntry = pEntry;
+    }
+
+    ~CallbackEntryScope()
+    {
+        g_pCurrentCallbackEntry = m_pPrevious;
+    }
 };
 
 // Design Ref: §2.2 — Windows 상대 지연(100ns 단위 음수 FILETIME).
@@ -89,9 +109,10 @@ inline void LogTQDebug(const std::string& msg)   { LibCommons::Logger::GetInstan
 
 // Design Ref: §3 — 단일 mutex + unordered_map. 샤딩은 후속 최적화 스코프로 분리.
 struct TimerQueue::Impl
+    : std::enable_shared_from_this<TimerQueue::Impl>
 {
     std::mutex                                                   m_MapMutex;
-    std::unordered_map<TimerId, std::unique_ptr<detail::Entry>>  m_Entries;
+    std::unordered_map<TimerId, std::shared_ptr<detail::Entry>>  m_Entries;
     std::atomic<TimerId>                                         m_NextId { 1 };
     std::atomic<detail::QueueState>                              m_QueueState { detail::QueueState::Running };
 
@@ -109,10 +130,11 @@ struct TimerQueue::Impl
 
     void RunEntry(detail::Entry& entry);
 
-    // Design Ref: §2.2 Cancel flow — Fast(Scheduled→Cancelled CAS) / Wait(진행 중 콜백 완료 대기) path.
-    // selfCancel=true 면 TP 콜백이 자기 엔트리를 취소하는 것이므로 WaitForThreadpoolTimerCallbacks 에
-    // FALSE 전달(데드락 방지).
-    bool CancelImpl(TimerId id, bool selfCancel);
+    // # 취소 시점 wait 정책 분기
+    bool CancelImpl(TimerId id, bool waitForCallbacks, bool currentCallbackEntry);
+
+    // # 현재 callback 자기 엔트리 판별
+    bool IsCurrentCallbackEntry(TimerId id) const noexcept;
 
     // Design Ref: §3.2 QueueState — Running → ShuttingDown → Dead.
     void ShutdownImpl(bool waitForCallbacks);
@@ -126,11 +148,18 @@ namespace
 void CALLBACK TpTimerCallback(PTP_CALLBACK_INSTANCE /*pInstance*/, PVOID pContext, PTP_TIMER /*pTimer*/)
 {
     auto* pEntry = static_cast<detail::Entry*>(pContext);
-    if (pEntry == nullptr || pEntry->owner == nullptr)
+    if (pEntry == nullptr) 
     {
         return;
     }
-    pEntry->owner->RunEntry(*pEntry);
+
+    auto pOwner = pEntry->owner.lock();
+    if (!pOwner)
+    {
+        return;
+    }
+
+    pOwner->RunEntry(*pEntry);
 }
 
 } // anonymous namespace
@@ -147,14 +176,14 @@ TimerId TimerQueue::Impl::ScheduleImpl(Duration delay, detail::TimerJob job, boo
 
     const TimerId id = AllocateId();
 
-    auto pEntry = std::make_unique<detail::Entry>();
+    auto pEntry = std::make_shared<detail::Entry>();
     pEntry->id         = id;
     pEntry->handle     = nullptr;
     pEntry->job        = std::move(job);
     pEntry->state.store(detail::EntryState::Scheduled, std::memory_order_relaxed);
     pEntry->isPeriodic = isPeriodic;
     pEntry->interval   = interval;
-    pEntry->owner      = this;
+    pEntry->owner      = this->shared_from_this();
 
     detail::Entry* pRaw = pEntry.get();
 
@@ -171,7 +200,7 @@ TimerId TimerQueue::Impl::ScheduleImpl(Duration delay, detail::TimerJob job, boo
 
     {
         std::lock_guard<std::mutex> lock(m_MapMutex);
-        m_Entries.emplace(id, std::move(pEntry));
+        m_Entries.emplace(id, pEntry);
     }
 
     FILETIME    due    = detail::MakeRelativeDueTime(delay);
@@ -190,6 +219,9 @@ TimerId TimerQueue::Impl::ScheduleImpl(Duration delay, detail::TimerJob job, boo
 
 void TimerQueue::Impl::RunEntry(detail::Entry& entry)
 {
+    auto keepAlive = entry.shared_from_this();
+    detail::CallbackEntryScope callbackScope(&entry);
+
     // Design Ref: §3.2 — Scheduled → Running CAS. Q3-a 겹침 허용으로 실패해도 진행.
     detail::EntryState expected = detail::EntryState::Scheduled;
     entry.state.compare_exchange_strong(
@@ -230,19 +262,30 @@ void TimerQueue::Impl::RunEntry(detail::Entry& entry)
             runningState, detail::EntryState::Scheduled,
             std::memory_order_acq_rel, std::memory_order_acquire);
     }
+
+    if (entry.closeAfterCallback.exchange(false, std::memory_order_acq_rel))
+    {
+        PTP_TIMER h = entry.handle;
+        entry.handle = nullptr;
+
+        if (h != nullptr)
+        {
+            ::CloseThreadpoolTimer(h);
+        }
+    }
 }
 
 
-// Design Ref: §2.2 Cancel flow — Fast/Wait path + selfCancel 데드락 방지.
-bool TimerQueue::Impl::CancelImpl(TimerId id, bool selfCancel)
+// Design Ref: §2.2 Cancel flow — Fast/Wait path + 현재 callback 엔트리 지연 close.
+bool TimerQueue::Impl::CancelImpl(TimerId id, bool waitForCallbacks, bool currentCallbackEntry)
 {
     if (id == kInvalidTimerId)
     {
         return false;
     }
 
-    // 맵에서 소유권 이전 (찾지 못하면 false).
-    std::unique_ptr<detail::Entry> pEntry;
+    // 맵에서 마지막 공개 참조를 제거 (찾지 못하면 false).
+    std::shared_ptr<detail::Entry> pEntry;
     {
         std::lock_guard<std::mutex> lock(m_MapMutex);
         auto it = m_Entries.find(id);
@@ -263,22 +306,41 @@ bool TimerQueue::Impl::CancelImpl(TimerId id, bool selfCancel)
     // periodic 콜백의 재-Scheduled CAS 가 실패하여 추가 발사가 차단된다.
     pEntry->state.store(detail::EntryState::Cancelled, std::memory_order_release);
 
-    // Design Ref: §4.4 — Self-cancel 데드락 방지: TRUE 대신 FALSE 전달.
-    //   TRUE 전달 시 현재 실행 중인 동일 콜백의 완료를 기다리다 교착.
     PTP_TIMER h = pEntry->handle;
-    pEntry->handle = nullptr;
 
     if (h != nullptr)
     {
         ::SetThreadpoolTimer(h, nullptr, 0, 0);
-        ::WaitForThreadpoolTimerCallbacks(h, selfCancel ? FALSE : TRUE);
-        ::CloseThreadpoolTimer(h);
+
+        if (currentCallbackEntry)
+        {
+            pEntry->closeAfterCallback.store(true, std::memory_order_release);
+        }
+        else
+        {
+            ::WaitForThreadpoolTimerCallbacks(h, waitForCallbacks ? TRUE : FALSE);
+            ::CloseThreadpoolTimer(h);
+            pEntry->handle = nullptr;
+        }
     }
 
-    LogTQDebug(std::format("Cancelled. Id : {}, Name : {}, SelfCancel : {}",
-        id, pEntry->job.name, selfCancel));
+    LogTQDebug(std::format("Cancelled. Id : {}, Name : {}, Wait : {}, CurrentCallback : {}",
+        id, pEntry->job.name, waitForCallbacks, currentCallbackEntry));
 
     return true;
+}
+
+
+bool TimerQueue::Impl::IsCurrentCallbackEntry(TimerId id) const noexcept
+{
+    const detail::Entry* pCurrent = detail::g_pCurrentCallbackEntry;
+    if (pCurrent == nullptr || pCurrent->id != id)
+    {
+        return false;
+    }
+
+    auto pOwner = pCurrent->owner.lock();
+    return pOwner && pOwner.get() == this;
 }
 
 
@@ -290,8 +352,8 @@ void TimerQueue::Impl::ShutdownImpl(bool waitForCallbacks)
             expected, detail::QueueState::ShuttingDown,
             std::memory_order_acq_rel, std::memory_order_acquire))
     {
-        LogTQInfo(std::format("Shutdown skipped (already invoked). State : {}",
-            static_cast<int>(expected)));
+        // Logger 가 이미 내려간 프로세스 종료 경로에서도 소멸자가 재진입할 수 있으므로,
+        // idempotent fast-path 에서는 추가 로깅 없이 조용히 반환한다.
         return;
     }
 
@@ -310,8 +372,8 @@ void TimerQueue::Impl::ShutdownImpl(bool waitForCallbacks)
 
     for (TimerId id : ids)
     {
-        // waitForCallbacks=false 일 때는 Wait 를 생략(selfCancel=true 의미로 재사용).
-        CancelImpl(id, /*selfCancel=*/!waitForCallbacks);
+        const bool currentCallbackEntry = IsCurrentCallbackEntry(id);
+        CancelImpl(id, waitForCallbacks, currentCallbackEntry);
     }
 
     m_QueueState.store(detail::QueueState::Dead, std::memory_order_release);
@@ -324,7 +386,7 @@ void TimerQueue::Impl::ShutdownImpl(bool waitForCallbacks)
 // ========================================================================
 
 TimerQueue::TimerQueue()
-    : m_pImpl(std::make_unique<Impl>())
+    : m_pImpl(std::make_shared<Impl>())
 {
     // Logger 카테고리 등록(최초 1회, 이후는 spdlog 직접 경로).
     LogTQInfo("TimerQueue constructed");
@@ -401,8 +463,10 @@ TimerId TimerQueue::SchedulePeriodic(Duration interval, std::unique_ptr<ITimerCo
 
 bool TimerQueue::Cancel(TimerId id)
 {
-    // 외부 호출은 기본적으로 non-self-cancel. 콜백 내부의 셀프 취소는 내부 경로에서 플래그 전달.
-    return m_pImpl->CancelImpl(id, /*selfCancel=*/false);
+    return m_pImpl->CancelImpl(
+        id,
+        /*waitForCallbacks=*/true,
+        m_pImpl->IsCurrentCallbackEntry(id));
 }
 
 
