@@ -10,6 +10,7 @@ module;
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <chrono>
 #include <random>
 #include <limits>
@@ -80,40 +81,53 @@ public:
 
         // v0.2 — Scenario B/C 용 진행 스냅샷. metrics 기반 파생값.
         std::atomic<std::uint64_t> packetsReceived  { 0 };
+        // Scenario B 에서 "보낸 패킷 누적" 표시용. metrics 기반 파생값 (round baseline 차감).
+        std::atomic<std::uint64_t> packetsSent      { 0 };
         std::atomic<int>           currentRound     { 0 };   // Scenario B: 1..roundCount
     };
 
     TestRunner() = default;
-    ~TestRunner() { Disconnect(); StopStressMode(); }
+    ~TestRunner() { Disconnect(); }
 
     void SetMetrics(MetricsCollector* pMetrics) { m_pMetrics = pMetrics; }
     void SetLogCallback(LogCallback cb) { m_LogCallback = std::move(cb); }
 
     bool Connect(const char* ip, int port)
     {
-        if (m_bConnected) return true;
+        PruneNormalConnectors();
+        if (HasNormalConnectionHandle()) return true;
 
         if (!EnsureIOService()) return false;
 
-        auto pSession = ConnectOne(ip, port);
-        if (!pSession) return false;
-
-        m_Sessions.push_back(pSession);
-        m_bConnected = true;
-        return true;
+        return ConnectOne(ip, port);
     }
 
     void Disconnect()
     {
-        // 1. 진행 중인 테스트 중단
-        m_bFloodRunning = false;
+        StopFlood();
+        StopStressMode();
 
-        // 2. 커넥터 해제 (소켓 닫기 → IO 완료 통지 중단)
-        for (auto& c : m_Connectors)
+        std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> toDrop;
+        {
+            std::lock_guard<std::mutex> lock(m_SessionsMutex);
+            PruneNormalConnectorsLocked();
+            toDrop = m_Connectors;
+        }
+
+        // 2. connector 가 disconnect state transition 을 시작하고,
+        //    세션 container 는 OnDisconnected 에서만 비워진다.
+        for (auto& c : toDrop)
         {
             if (c) c->DisConnect();
         }
-        m_Connectors.clear();
+
+        WaitForNormalSessionsDrained();
+
+        {
+            std::lock_guard<std::mutex> lock(m_SessionsMutex);
+            PruneNormalConnectorsLocked();
+            m_Connectors.clear();
+        }
 
         // 3. IO 서비스 중지 (워커 스레드 종료 대기)
         if (m_pIOService)
@@ -121,18 +135,19 @@ public:
             m_pIOService->Stop();
             m_pIOService.reset();
         }
-
-        // 4. 워커 스레드 종료 후 세션 해제 (use-after-free 방지)
-        m_Sessions.clear();
-        m_bConnected = false;
     }
 
-    bool IsConnected() const { return m_bConnected; }
+    bool IsConnected() const
+    {
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        return !m_Sessions.empty();
+    }
 
     // Design Ref: §3.5 — Echo test (에코 N회)
     void RunEchoTest(int count)
     {
-        for (auto& pSession : m_Sessions)
+        auto sessions = GetSessions();
+        for (auto& pSession : sessions)
         {
             if (pSession) pSession->StartEchoLoop(count);
         }
@@ -141,30 +156,36 @@ public:
     // Design Ref: §3.5 — Flood test (N초간 최대 속도)
     void RunFloodTest(int durationSec)
     {
+        StopFlood();
         m_bFloodRunning = true;
         m_FloodThread = std::thread([this, durationSec]()
         {
             auto endTime = std::chrono::steady_clock::now() + std::chrono::seconds(durationSec);
             while (m_bFloodRunning && std::chrono::steady_clock::now() < endTime)
             {
-                for (auto& pSession : m_Sessions)
+                auto sessions = GetSessions();
+                for (auto& pSession : sessions)
                 {
                     if (pSession) pSession->SendEcho("flood");
                 }
             }
             m_bFloodRunning = false;
         });
-        m_FloodThread.detach();
     }
 
-    void StopFlood() { m_bFloodRunning = false; }
+    void StopFlood()
+    {
+        m_bFloodRunning = false;
+        JoinFloodThreadIfNeeded();
+    }
     bool IsFloodRunning() const { return m_bFloodRunning; }
 
     // Design Ref: §3.5 — Generic test state (covers echo + flood)
     bool IsTestRunning() const
     {
         if (m_bFloodRunning) return true;
-        for (auto& pSession : m_Sessions)
+        auto sessions = GetSessions();
+        for (auto& pSession : sessions)
         {
             if (pSession && pSession->GetEchoCount() > 0) return true;
         }
@@ -173,65 +194,75 @@ public:
 
     void StopTest()
     {
-        m_bFloodRunning = false;
+        StopFlood();
         // Echo는 세션 단위로 남은 횟수를 소진하므로 별도 중단 불필요
     }
 
     bool ConnectScale(const char* ip, int port, int count)
     {
         if (!EnsureIOService()) return false;
+        PruneNormalConnectors();
 
         int success = 0;
         for (int i = 0; i < count; ++i)
         {
-            auto pSession = ConnectOne(ip, port);
-            if (pSession)
+            if (ConnectOne(ip, port))
             {
-                m_Sessions.push_back(pSession);
                 ++success;
             }
         }
 
-        m_bConnected = (success > 0) || m_bConnected;
         return success > 0;
     }
 
-    int GetConnectionCount() const { return static_cast<int>(m_Connectors.size()); }
+    int GetConnectionCount() const
+    {
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        return static_cast<int>(m_Sessions.size());
+    }
 
     // 세션 접근 (에코 테스트 등에서 사용)
-    const std::vector<std::shared_ptr<TestSession>>& GetSessions() const { return m_Sessions; }
+    std::vector<std::shared_ptr<TestSession>> GetSessions() const
+    {
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        return m_Sessions;
+    }
 
     // Design Ref: server-status §5.2 — Admin 요청은 첫 세션(주 연결)을 통해 송신.
     // Scale 테스트로 늘어난 세션들은 제외 — admin 은 UI 가 하나의 채널로 폴링.
     bool SendAdminSummaryRequest()
     {
-        if (m_Sessions.empty() || !m_Sessions.front()) return false;
-        m_Sessions.front()->SendAdminSummaryRequest();
+        auto pSession = GetPrimarySession();
+        if (!pSession) return false;
+        pSession->SendAdminSummaryRequest();
         return true;
     }
 
     bool SendAdminSessionListRequest(uint32_t offset, uint32_t limit)
     {
-        if (m_Sessions.empty() || !m_Sessions.front()) return false;
-        m_Sessions.front()->SendAdminSessionListRequest(offset, limit);
+        auto pSession = GetPrimarySession();
+        if (!pSession) return false;
+        pSession->SendAdminSessionListRequest(offset, limit);
         return true;
     }
 
     void SetAdminSummaryCallback(TestSession::AdminSummaryCallback cb)
     {
         m_AdminSummaryCb = std::move(cb);
-        if (!m_Sessions.empty() && m_Sessions.front())
+        auto pSession = GetPrimarySession();
+        if (pSession)
         {
-            m_Sessions.front()->SetAdminSummaryCallback(m_AdminSummaryCb);
+            pSession->SetAdminSummaryCallback(m_AdminSummaryCb);
         }
     }
 
     void SetAdminSessionListCallback(TestSession::AdminSessionListCallback cb)
     {
         m_AdminSessionListCb = std::move(cb);
-        if (!m_Sessions.empty() && m_Sessions.front())
+        auto pSession = GetPrimarySession();
+        if (pSession)
         {
-            m_Sessions.front()->SetAdminSessionListCallback(m_AdminSessionListCb);
+            pSession->SetAdminSessionListCallback(m_AdminSessionListCb);
         }
     }
 
@@ -254,6 +285,7 @@ public:
         m_StressStats.elapsedSec.store(0, std::memory_order_relaxed);
         m_StressStats.crashSuspected.store(false, std::memory_order_relaxed);
         m_StressStats.packetsReceived.store(0, std::memory_order_relaxed);
+        m_StressStats.packetsSent.store(0, std::memory_order_relaxed);
         m_StressStats.currentRound.store(0, std::memory_order_relaxed);
         m_StressStats.running.store(true, std::memory_order_release);
 
@@ -265,7 +297,10 @@ public:
     void StopStressMode()
     {
         m_StressStats.running.store(false, std::memory_order_release);
-        if (m_StressThread.joinable()) m_StressThread.join();
+        if (m_StressThread.joinable() && m_StressThread.get_id() != std::this_thread::get_id())
+        {
+            m_StressThread.join();
+        }
 
         m_StressBuildUpDone.store(false, std::memory_order_relaxed);
 
@@ -273,17 +308,53 @@ public:
         std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> toDrop;
         {
             std::lock_guard<std::mutex> lock(m_StressMutex);
-            toDrop.swap(m_StressConnectors);
-            m_StressSessions.clear();
-            m_StressStats.active.store(0, std::memory_order_relaxed);
+            PruneStressConnectorsLocked();
+            toDrop = m_StressConnectors;
         }
         for (auto& c : toDrop) { if (c) c->DisConnect(); }
+
+        WaitForStressSessionsDrained();
+
+        {
+            std::lock_guard<std::mutex> lock(m_StressMutex);
+            PruneStressConnectorsLocked();
+            m_StressConnectors.clear();
+        }
     }
 
     const StressStats& GetStressStats() const { return m_StressStats; }
     bool IsStressRunning() const { return m_StressStats.running.load(std::memory_order_acquire); }
 
 private:
+    void JoinFloodThreadIfNeeded()
+    {
+        if (!m_FloodThread.joinable())
+        {
+            return;
+        }
+
+        if (m_FloodThread.get_id() == std::this_thread::get_id())
+        {
+            return;
+        }
+
+        m_FloodThread.join();
+    }
+
+    void PruneNormalConnectors()
+    {
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        PruneNormalConnectorsLocked();
+    }
+
+    bool HasNormalConnectionHandle() const
+    {
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        const bool anyTrackedConnector = std::any_of(m_Connectors.begin(), m_Connectors.end(),
+            [](const auto& connector) { return connector && connector->HasTrackedSession(); });
+        return !m_Sessions.empty() || anyTrackedConnector;
+    }
+
     bool EnsureIOService()
     {
         if (!m_pIOService)
@@ -294,26 +365,185 @@ private:
         return m_pIOService != nullptr;
     }
 
-    // 공용 저수준 헬퍼: connector 를 만들고 (session, connector) 쌍 반환.
-    // push 는 호출자 책임. Connect/ConnectScale 은 m_Connectors/m_Sessions 에,
-    // Stress 는 m_StressConnectors/m_StressSessions 에 각각 저장.
-    struct CreateResult
+    std::shared_ptr<TestSession> GetPrimarySession() const
     {
-        std::shared_ptr<TestSession> session;
-        std::shared_ptr<LibNetworks::Core::IOSocketConnector> connector;
-    };
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        if (m_Sessions.empty())
+        {
+            return {};
+        }
+        return m_Sessions.front();
+    }
 
-    CreateResult CreateConnection(const char* ip, int port, bool injectAdminCallbacks)
+    void PruneNormalConnectorsLocked()
     {
-        CreateResult out;
+        m_Connectors.erase(
+            std::remove_if(m_Connectors.begin(), m_Connectors.end(),
+                [](const auto& connector) { return !connector || !connector->HasTrackedSession(); }),
+            m_Connectors.end());
+    }
+
+    void PruneStressConnectorsLocked()
+    {
+        m_StressConnectors.erase(
+            std::remove_if(m_StressConnectors.begin(), m_StressConnectors.end(),
+                [](const auto& connector) { return !connector || !connector->HasTrackedSession(); }),
+            m_StressConnectors.end());
+    }
+
+    void AddNormalSession(const std::shared_ptr<TestSession>& session)
+    {
+        if (!session)
+        {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        const auto sessionId = session->GetSessionId();
+        const bool exists = std::any_of(m_Sessions.begin(), m_Sessions.end(),
+            [sessionId](const auto& current) { return current && current->GetSessionId() == sessionId; });
+        if (exists)
+        {
+            return;
+        }
+
+        const bool wasEmpty = m_Sessions.empty();
+        m_Sessions.push_back(session);
+        if (wasEmpty)
+        {
+            if (m_AdminSummaryCb) session->SetAdminSummaryCallback(m_AdminSummaryCb);
+            if (m_AdminSessionListCb) session->SetAdminSessionListCallback(m_AdminSessionListCb);
+        }
+    }
+
+    void RemoveNormalSession(uint64_t sessionId)
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_SessionsMutex);
+            m_Sessions.erase(
+                std::remove_if(m_Sessions.begin(), m_Sessions.end(),
+                    [sessionId](const auto& current) { return !current || current->GetSessionId() == sessionId; }),
+                m_Sessions.end());
+            PruneNormalConnectorsLocked();
+
+            if (!m_Sessions.empty())
+            {
+                if (m_AdminSummaryCb) m_Sessions.front()->SetAdminSummaryCallback(m_AdminSummaryCb);
+                if (m_AdminSessionListCb) m_Sessions.front()->SetAdminSessionListCallback(m_AdminSessionListCb);
+            }
+        }
+
+        m_SessionsCv.notify_all();
+    }
+
+    void AddStressSession(const std::shared_ptr<TestSession>& session)
+    {
+        if (!session)
+        {
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_StressMutex);
+            const auto sessionId = session->GetSessionId();
+            const bool exists = std::any_of(m_StressSessions.begin(), m_StressSessions.end(),
+                [sessionId](const auto& current) { return current && current->GetSessionId() == sessionId; });
+            if (exists)
+            {
+                return;
+            }
+
+            m_StressSessions.push_back(session);
+            m_StressStats.totalAccepted.fetch_add(1, std::memory_order_relaxed);
+            m_StressStats.active.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    void RemoveStressSession(uint64_t sessionId)
+    {
+        bool removed = false;
+        {
+            std::lock_guard<std::mutex> lock(m_StressMutex);
+            const auto before = m_StressSessions.size();
+            m_StressSessions.erase(
+                std::remove_if(m_StressSessions.begin(), m_StressSessions.end(),
+                    [sessionId](const auto& current) { return !current || current->GetSessionId() == sessionId; }),
+                m_StressSessions.end());
+            removed = before != m_StressSessions.size();
+            PruneStressConnectorsLocked();
+        }
+
+        if (removed)
+        {
+            m_StressStats.active.fetch_sub(1, std::memory_order_relaxed);
+        }
+        m_StressCv.notify_all();
+    }
+
+    void OnStressSessionActivated(const std::shared_ptr<TestSession>& session)
+    {
+        if (!session)
+        {
+            return;
+        }
+
+        const bool autoStart = m_StressBuildUpDone.load(std::memory_order_acquire)
+                            && m_StressEnableEcho
+                            && m_CurrentStressScenario != StressScenario::Burst;
+        if (!autoStart)
+        {
+            return;
+        }
+
+        session->StartEchoLoop((std::numeric_limits<int>::max)());
+    }
+
+    void WaitForNormalSessionsDrained()
+    {
+        using namespace std::chrono_literals;
+        std::unique_lock<std::mutex> lock(m_SessionsMutex);
+        while (true)
+        {
+            PruneNormalConnectorsLocked();
+            if (m_Sessions.empty() && m_Connectors.empty())
+            {
+                return;
+            }
+            m_SessionsCv.wait_for(lock, 50ms);
+        }
+    }
+
+    void WaitForStressSessionsDrained()
+    {
+        using namespace std::chrono_literals;
+        std::unique_lock<std::mutex> lock(m_StressMutex);
+        while (true)
+        {
+            PruneStressConnectorsLocked();
+            if (m_StressSessions.empty() && m_StressConnectors.empty())
+            {
+                return;
+            }
+            m_StressCv.wait_for(lock, 50ms);
+        }
+    }
+
+    // 공용 저수준 헬퍼: connector 를 만들고, session 은 activation callback 에서 container 로 handoff 된다.
+    std::shared_ptr<LibNetworks::Core::IOSocketConnector> CreateConnection(
+        const char* ip,
+        int port,
+        bool injectAdminCallbacks,
+        bool isStressConnection,
+        std::string initialEchoPayload = {})
+    {
         auto pMetrics = m_pMetrics;
         auto logCb = m_LogCallback;
-        auto* pResult = &out.session;
+        auto* pRunner = this;
 
         auto adminSummaryCb = injectAdminCallbacks ? m_AdminSummaryCb : TestSession::AdminSummaryCallback{};
         auto adminListCb    = injectAdminCallbacks ? m_AdminSessionListCb : TestSession::AdminSessionListCallback{};
 
-        auto pOnCreateSession = [pMetrics, logCb, pResult, adminSummaryCb, adminListCb](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket)
+        auto pOnCreateSession = [pMetrics, logCb, adminSummaryCb, adminListCb, pRunner, isStressConnection, initialEchoPayload = std::move(initialEchoPayload)](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket)
             -> std::shared_ptr<LibNetworks::Sessions::OutboundSession>
             {
                 const size_t bufferSize = 8 * 1024;
@@ -324,23 +554,64 @@ private:
                 pSession->SetLogCallback(logCb);
                 if (adminSummaryCb) pSession->SetAdminSummaryCallback(adminSummaryCb);
                 if (adminListCb)    pSession->SetAdminSessionListCallback(adminListCb);
-                *pResult = pSession;
+                if (!initialEchoPayload.empty()) pSession->SetEchoPayload(initialEchoPayload);
+                pSession->SetConnectedCallback([pRunner, isStressConnection](const std::shared_ptr<TestSession>& connected)
+                {
+                    if (!pRunner || !connected)
+                    {
+                        return;
+                    }
+
+                    if (isStressConnection)
+                    {
+                        pRunner->AddStressSession(connected);
+                    }
+                    else
+                    {
+                        pRunner->AddNormalSession(connected);
+                    }
+                });
+                pSession->SetActivatedCallback([pRunner, isStressConnection](const std::shared_ptr<TestSession>& connected)
+                {
+                    if (!pRunner || !connected || !isStressConnection)
+                    {
+                        return;
+                    }
+
+                    pRunner->OnStressSessionActivated(connected);
+                });
+                pSession->SetDisconnectedCallback([pRunner, isStressConnection](uint64_t sessionId)
+                {
+                    if (!pRunner)
+                    {
+                        return;
+                    }
+
+                    if (isStressConnection)
+                    {
+                        pRunner->RemoveStressSession(sessionId);
+                    }
+                    else
+                    {
+                        pRunner->RemoveNormalSession(sessionId);
+                    }
+                });
                 return pSession;
             };
 
-        out.connector = LibNetworks::Core::IOSocketConnector::Create(
+        return LibNetworks::Core::IOSocketConnector::Create(
             m_pIOService, pOnCreateSession, std::string(ip), static_cast<unsigned short>(port));
-
-        return out;
     }
 
-    std::shared_ptr<TestSession> ConnectOne(const char* ip, int port)
+    bool ConnectOne(const char* ip, int port)
     {
-        const bool isFirst = m_Sessions.empty();
-        auto res = CreateConnection(ip, port, isFirst);
-        if (!res.connector) return nullptr;
-        m_Connectors.push_back(res.connector);
-        return res.session;
+        const bool isFirst = !HasNormalConnectionHandle();
+        auto connector = CreateConnection(ip, port, isFirst, /*isStressConnection=*/false);
+        if (!connector) return false;
+        std::lock_guard<std::mutex> lock(m_SessionsMutex);
+        PruneNormalConnectorsLocked();
+        m_Connectors.push_back(connector);
+        return true;
     }
 
     // Design Ref: iosession-lifetime-race §5 — Stress scenario dispatcher (v0.2).
@@ -464,6 +735,7 @@ private:
 
         // round 별 시작 시 metrics baseline 기록.
         const std::uint64_t metricsBaseline = SnapshotReceivedPackets();
+        const std::uint64_t sentBaseline    = SnapshotSentPackets();
         std::uint64_t cumulativeRoundTarget = metricsBaseline;
 
         for (int r = 1; r <= rounds && m_StressStats.running.load(std::memory_order_acquire); ++r)
@@ -496,7 +768,9 @@ private:
                 && steady_clock::now() < roundTimeout)
             {
                 const std::uint64_t received = SnapshotReceivedPackets();
+                const std::uint64_t sent     = SnapshotSentPackets();
                 m_StressStats.packetsReceived.store(received - metricsBaseline, std::memory_order_relaxed);
+                m_StressStats.packetsSent.store(sent - sentBaseline, std::memory_order_relaxed);
                 m_StressStats.elapsedSec.store(
                     static_cast<int>(duration_cast<seconds>(steady_clock::now() - startTime).count()),
                     std::memory_order_relaxed);
@@ -586,6 +860,23 @@ private:
         return total;
     }
 
+    // 송신 패킷 수 합산. SnapshotReceivedPackets 와 동일한 세트(m_StressSessions) 를 사용한다.
+    // Scenario B 의 "Packets Sent" 표시에 사용되며, round baseline 과의 차로 진행량 계산.
+    std::uint64_t SnapshotSentPackets()
+    {
+        std::uint64_t total = 0;
+        std::vector<std::shared_ptr<TestSession>> snapshot;
+        {
+            std::lock_guard<std::mutex> lock(m_StressMutex);
+            snapshot = m_StressSessions;
+        }
+        for (const auto& s : snapshot)
+        {
+            if (s) total += s->GetSendEchoCount();
+        }
+        return total;
+    }
+
     std::size_t CountConnectedStressSessions()
     {
         std::size_t count = 0;
@@ -638,41 +929,16 @@ private:
     void TryStressConnect(const char* ip, int port)
     {
         m_StressStats.connectAttempts.fetch_add(1, std::memory_order_relaxed);
-        auto res = CreateConnection(ip, port, /*injectAdminCallbacks=*/false);
-        if (!res.connector)
+        auto connector = CreateConnection(ip, port, /*injectAdminCallbacks=*/false, /*isStressConnection=*/true, m_StressPayload);
+        if (!connector)
         {
             m_StressStats.connectFailures.fetch_add(1, std::memory_order_relaxed);
             return;
         }
 
-        // Echo payload 주입.
-        if (res.session && !m_StressPayload.empty())
-        {
-            res.session->SetEchoPayload(m_StressPayload);
-        }
-
-        // Churn reconnect 등의 상황에서 즉시 echo 시작 여부 결정.
-        // 빌드업 중에는 시나리오별로 StartEchoOnAllStressSessions() 나 라운드 루프가
-        // 시작을 제어하므로 여기서 자동 시작하지 않음.
-        const bool shouldAutoStart = m_StressBuildUpDone.load(std::memory_order_acquire)
-                                   && m_StressEnableEcho;
-
-        if (shouldAutoStart && res.session)
-        {
-            // Burst 시나리오인 경우 Churn(재연결)이 발생하더라도 개별 세션이 
-            // 무한 루프를 도는 것은 라운드 제어와 충돌할 수 있음.
-            // 하지만 현재 Burst 는 Churn 이 없으므로 안전.
-            if (m_CurrentStressScenario != StressScenario::Burst)
-            {
-                res.session->StartEchoLoop((std::numeric_limits<int>::max)());
-            }
-        }
-
         std::lock_guard<std::mutex> lock(m_StressMutex);
-        m_StressConnectors.push_back(res.connector);
-        m_StressSessions.push_back(res.session);
-        m_StressStats.totalAccepted.fetch_add(1, std::memory_order_relaxed);
-        m_StressStats.active.fetch_add(1, std::memory_order_relaxed);
+        PruneStressConnectorsLocked();
+        m_StressConnectors.push_back(connector);
     }
 
     // Build-up 완료 후 전체 세션에 echo loop 시작.
@@ -715,16 +981,12 @@ private:
         std::shared_ptr<LibNetworks::Core::IOSocketConnector> victim;
         {
             std::lock_guard<std::mutex> lock(m_StressMutex);
+            PruneStressConnectorsLocked();
             if (m_StressConnectors.empty()) return;
             std::uniform_int_distribution<size_t> dist(0, m_StressConnectors.size() - 1);
             const size_t idx = dist(m_StressRng);
             victim = m_StressConnectors[idx];
             m_StressConnectors.erase(m_StressConnectors.begin() + idx);
-            if (idx < m_StressSessions.size())
-            {
-                m_StressSessions.erase(m_StressSessions.begin() + idx);
-            }
-            m_StressStats.active.fetch_sub(1, std::memory_order_relaxed);
         }
         if (victim) victim->DisConnect();
 
@@ -735,9 +997,10 @@ private:
     MetricsCollector* m_pMetrics = nullptr;
     LogCallback m_LogCallback;
     std::shared_ptr<LibNetworks::Services::IOService> m_pIOService;
+    mutable std::mutex m_SessionsMutex;
+    std::condition_variable m_SessionsCv;
     std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> m_Connectors;
     std::vector<std::shared_ptr<TestSession>> m_Sessions;
-    bool m_bConnected = false;
     std::atomic<bool> m_bFloodRunning = false;
     std::thread m_FloodThread;
 
@@ -749,6 +1012,7 @@ private:
     StressStats                                                        m_StressStats;
     std::thread                                                        m_StressThread;
     std::mutex                                                         m_StressMutex;
+    std::condition_variable                                            m_StressCv;
     std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> m_StressConnectors;
     std::vector<std::shared_ptr<TestSession>>                          m_StressSessions;
     std::mt19937                                                       m_StressRng { std::random_device{}() };

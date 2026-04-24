@@ -14,6 +14,7 @@
 #include <atomic>
 
 import networks.sessions.io_session;
+import networks.sessions.outbound_session;
 import networks.core.socket;
 import networks.core.packet;
 import commons.buffers.circle_buffer_queue;
@@ -126,6 +127,57 @@ private:
     std::atomic<int> m_OnSentCount { 0 };
 };
 
+class TestableOutboundSession : public LibNetworks::Sessions::OutboundSession
+{
+public:
+    using LibNetworks::Sessions::OutboundSession::OutboundSession;
+
+    void MarkConnectPostedForTest() noexcept
+    {
+        MarkConnectIoPosted();
+    }
+
+    void UndoConnectPostedForTest() noexcept
+    {
+        UndoConnectIoOnPostFailure();
+    }
+
+    void CompleteConnectFromExistingOutstanding(bool success)
+    {
+        this->OnIOCompleted(success, 0, &GetConnectOverlapped());
+    }
+
+    int GetOutstandingIoCountForTest() const noexcept
+    {
+        return DebugGetOutstandingIoCountForTest();
+    }
+
+    int GetDisconnectedCountForTest() const noexcept
+    {
+        return m_DisconnectedCount.load();
+    }
+
+    int GetConnectedCountForTest() const noexcept
+    {
+        return m_ConnectedCount.load();
+    }
+
+protected:
+    void OnConnected() override
+    {
+        m_ConnectedCount.fetch_add(1);
+    }
+
+    void OnDisconnected() override
+    {
+        m_DisconnectedCount.fetch_add(1);
+    }
+
+private:
+    std::atomic<int> m_DisconnectedCount { 0 };
+    std::atomic<int> m_ConnectedCount { 0 };
+};
+
 
 namespace
 {
@@ -137,6 +189,14 @@ std::shared_ptr<TestableIOSession> MakeSession(std::size_t bufCap = 8 * 1024)
     auto pRecv   = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufCap);
     auto pSend   = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufCap);
     return std::make_shared<TestableIOSession>(pSocket, std::move(pRecv), std::move(pSend));
+}
+
+std::shared_ptr<TestableOutboundSession> MakeOutboundSession(std::size_t bufCap = 8 * 1024)
+{
+    auto pSocket = std::make_shared<LibNetworks::Core::Socket>();
+    auto pRecv   = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufCap);
+    auto pSend   = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(bufCap);
+    return std::make_shared<TestableOutboundSession>(pSocket, std::move(pRecv), std::move(pSend));
 }
 } // anonymous namespace
 
@@ -337,6 +397,57 @@ public:
         }
         Assert::IsTrue(true,
             L"~IOSession() 은 counter != 0 이어도 ERROR 로그만 찍고 크래시 없이 반환되어야 함");
+    }
+
+    TEST_METHOD(ConnectOutstanding_UndoOnPostFailure_RestoresZero)
+    {
+        auto pSession = MakeOutboundSession();
+
+        pSession->MarkConnectPostedForTest();
+
+        Assert::AreEqual(1, pSession->GetOutstandingIoCountForTest(),
+            L"ConnectEx posting 직후 outstanding 은 1이어야 함");
+
+        pSession->UndoConnectPostedForTest();
+
+        Assert::AreEqual(0, pSession->GetOutstandingIoCountForTest(),
+            L"ConnectEx posting 실패 rollback 후 outstanding 은 0으로 복구되어야 함");
+    }
+
+    TEST_METHOD(ConnectCompletion_LastDrain_FiresOnDisconnected)
+    {
+        auto pSession = MakeOutboundSession();
+        pSession->MarkConnectPostedForTest();
+
+        pSession->RequestDisconnect(LibNetworks::Sessions::DisconnectReason::Server);
+
+        Assert::AreEqual(0, pSession->GetDisconnectedCountForTest(),
+            L"pending ConnectEx 가 남아 있으면 RequestDisconnect 직후에는 OnDisconnected 가 fire 되면 안 됨");
+        Assert::AreEqual(1, pSession->GetOutstandingIoCountForTest(),
+            L"ConnectEx pending 동안 outstanding 은 1이어야 함");
+
+        pSession->CompleteConnectFromExistingOutstanding(false);
+
+        Assert::AreEqual(1, pSession->GetDisconnectedCountForTest(),
+            L"ConnectEx completion drain 이후 OnDisconnected 가 정확히 1회 fire 되어야 함");
+        Assert::AreEqual(0, pSession->GetOutstandingIoCountForTest(),
+            L"ConnectEx completion drain 이후 outstanding 은 0이어야 함");
+    }
+
+    TEST_METHOD(ConnectCompletion_AfterDisconnect_DoesNotCallOnConnected)
+    {
+        auto pSession = MakeOutboundSession();
+        pSession->MarkConnectPostedForTest();
+
+        pSession->RequestDisconnect(LibNetworks::Sessions::DisconnectReason::Server);
+        pSession->CompleteConnectFromExistingOutstanding(true);
+
+        Assert::AreEqual(0, pSession->GetConnectedCountForTest(),
+            L"disconnect 요청 이후 뒤늦게 도착한 connect completion 은 OnConnected 를 호출하면 안 됨");
+        Assert::AreEqual(1, pSession->GetDisconnectedCountForTest(),
+            L"connect completion drain 이후 OnDisconnected 는 1회 fire 되어야 함");
+        Assert::AreEqual(0, pSession->GetOutstandingIoCountForTest(),
+            L"drain 완료 후 outstanding 은 0이어야 함");
     }
 };
 

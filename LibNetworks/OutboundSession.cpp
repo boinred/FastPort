@@ -1,13 +1,13 @@
 ﻿module;
 
 #include <utility>
+#include <functional>
 #include <spdlog/spdlog.h>
 module networks.sessions.outbound_session;
 import commons.logger;
 
 namespace LibNetworks::Sessions
 {
-
 
 OutboundSession::OutboundSession(const std::shared_ptr<Core::Socket>& pSocket,
     std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
@@ -17,23 +17,61 @@ OutboundSession::OutboundSession(const std::shared_ptr<Core::Socket>& pSocket,
     std::memset(&m_ConnectOverlapped, 0, sizeof(OVERLAPPED));
 }
 
-
 void OutboundSession::OnConnected()
 {
     LibCommons::Logger::GetInstance().LogInfo("OutboundSession", "OnConnected. Session Id : {}", GetSessionId());
 
     StartReceiveLoop();
+    NotifyActivationObserver();
 }
 
 void OutboundSession::OnDisconnected()
 {
     LibCommons::Logger::GetInstance().LogInfo("OutboundSession", "OnDisconnected. Session Id : {}", GetSessionId());
-    //throw std::logic_error("The method or operation is not implemented.");
+    NotifyDisconnectObserver();
 }
 
 bool OutboundSession::IsConnectCompletion(const OVERLAPPED* pOverlapped) const
 {
     return pOverlapped == &m_ConnectOverlapped;
+}
+
+void OutboundSession::MarkConnectIoPosted() noexcept
+{
+    AddOutstandingIo();
+    m_ConnectIoPending.store(true, std::memory_order_release);
+}
+
+void OutboundSession::UndoConnectIoOnPostFailure() noexcept
+{
+    m_ConnectIoPending.store(false, std::memory_order_release);
+    UndoOutstandingOnFailure("ConnectEx");
+}
+
+void OutboundSession::SetActivationObserver(std::function<void()> observer)
+{
+    m_ActivationObserver = std::move(observer);
+}
+
+void OutboundSession::SetDisconnectObserver(std::function<void()> observer)
+{
+    m_DisconnectObserver = std::move(observer);
+}
+
+void OutboundSession::NotifyActivationObserver()
+{
+    if (m_ActivationObserver)
+    {
+        m_ActivationObserver();
+    }
+}
+
+void OutboundSession::NotifyDisconnectObserver()
+{
+    if (m_DisconnectObserver)
+    {
+        m_DisconnectObserver();
+    }
 }
 
 void OutboundSession::ApplyConnectedSocketOptions()
@@ -66,6 +104,19 @@ void OutboundSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERL
     if (!IsConnectCompletion(pOverlapped))
     {
         __super::OnIOCompleted(bSuccess, bytesTransferred, pOverlapped);
+        return;
+    }
+
+	auto pOutboundSession = shared_from_this();
+
+    IoCompletionGuard guard(pOutboundSession);
+    m_ConnectIoPending.store(false, std::memory_order_release);
+
+    if (IsDisconnectRequested())
+    {
+        LibCommons::Logger::GetInstance().LogDebug("OutboundSession",
+            "OnIOCompleted: Connect completion ignored after disconnect request. Session Id : {}",
+            GetSessionId());
         return;
     }
 

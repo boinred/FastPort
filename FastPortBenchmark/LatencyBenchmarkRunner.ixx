@@ -7,6 +7,7 @@ export module benchmark.latency_runner;
 import std;
 import benchmark.stats;
 import benchmark.runner;
+import benchmark.session;
 import networks.services.inetwork_service;
 
 namespace FastPortBenchmark
@@ -32,6 +33,7 @@ public:
 private:
     void SetState(BenchmarkState state);
     void RunBenchmark();
+    void DisconnectAndWaitDrain(const std::shared_ptr<IBenchmarkSession>& pSession);
 
 private:
     BenchmarkConfig m_Config;

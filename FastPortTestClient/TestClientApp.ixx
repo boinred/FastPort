@@ -1,4 +1,4 @@
-// Design Ref: §3.2 — TestClientApp (UI layout + app state management)
+﻿// Design Ref: §3.2 — TestClientApp (UI layout + app state management)
 // Plan SC: SC1-SC6 (전체 UI 통합)
 module;
 
@@ -26,6 +26,8 @@ public:
 
     // Design Ref: §3.2 — AppState enum for explicit state management
     enum class AppState { Disconnected, Connecting, Connected, Testing };
+
+    ~TestClientApp() { Shutdown(); }
 
     void Initialize(LogCallback logCb)
     {
@@ -95,8 +97,8 @@ public:
 
     void Shutdown()
     {
-        m_Runner.Disconnect();
         m_ABCompare.Stop();
+        m_Runner.Disconnect();
         m_State = AppState::Disconnected;
     }
 
@@ -634,8 +636,8 @@ private:
             // Design Ref: iosession-lifetime-race §5.2 — Echo 트래픽 옵션.
             ImGui::Checkbox("Enable Echo Ping-Pong", &m_StressEnableEcho);
             ImGui::InputInt("Payload Size (bytes)", &m_StressPayloadBytes);
-            if (m_StressPayloadBytes < 1)    m_StressPayloadBytes = 1;
-            if (m_StressPayloadBytes > 8192) m_StressPayloadBytes = 8192;
+            if (m_StressPayloadBytes < 1)      m_StressPayloadBytes = 1;
+            if (m_StressPayloadBytes > 262144) m_StressPayloadBytes = 262144;
             if (ImGui::SmallButton("4 B"))    m_StressPayloadBytes = 4;
             ImGui::SameLine();
             if (ImGui::SmallButton("64 B"))   m_StressPayloadBytes = 64;
@@ -643,6 +645,16 @@ private:
             if (ImGui::SmallButton("1 KB"))   m_StressPayloadBytes = 1024;
             ImGui::SameLine();
             if (ImGui::SmallButton("4 KB"))   m_StressPayloadBytes = 4096;
+            // 참고: 8KB, 16KB 는 안전. 64KB, 256KB 는 현재 Packet header(uint16_t, Packet.ixx §GetHeaderSize)
+            // 한계(65535 B)를 초과 → SendMessage 의 htons(static_cast<uint16_t>(totalSize)) 에서 truncation.
+            // Protocol header 를 uint32_t 로 확장하기 전까지 64KB 이상은 프레이밍이 깨진다는 점에 주의.
+            if (ImGui::SmallButton("8 KB"))   m_StressPayloadBytes = 8192;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("16 KB"))  m_StressPayloadBytes = 16384;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("64 KB"))  m_StressPayloadBytes = 65536;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("256 KB")) m_StressPayloadBytes = 262144;
         }
         ImGui::EndDisabled();
 
@@ -727,10 +739,12 @@ private:
 
         if (m_StressScenario == 1)
         {
-            // Scenario B — Burst: round + packetsReceived.
+            // Scenario B — Burst: round + packetsSent + packetsReceived.
             const int round = st.currentRound.load(std::memory_order_relaxed);
+            const auto sent = st.packetsSent.load(std::memory_order_relaxed);
             const auto pkts = st.packetsReceived.load(std::memory_order_relaxed);
             ImGui::Text("Current Round    : %d / %d", round, m_StressBurstRounds);
+            ImGui::Text("Packets Sent     : %llu", static_cast<unsigned long long>(sent));
             ImGui::Text("Packets Received : %llu", static_cast<unsigned long long>(pkts));
             ImGui::Text("Elapsed          : %d sec", elapsed);
         }

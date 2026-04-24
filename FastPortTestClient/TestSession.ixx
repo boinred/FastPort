@@ -30,6 +30,9 @@ export class TestSession : public LibNetworks::Sessions::OutboundSession
 {
 public:
     using LogCallback = std::function<void(const char*)>;
+    using ConnectedCallback = std::function<void(const std::shared_ptr<TestSession>&)>;
+    using ActivatedCallback = std::function<void(const std::shared_ptr<TestSession>&)>;
+    using DisconnectedCallback = std::function<void(uint64_t)>;
 
     TestSession(const std::shared_ptr<LibNetworks::Core::Socket>& pSocket,
         std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
@@ -42,6 +45,9 @@ public:
 
     void SetMetrics(MetricsCollector* pMetrics) { m_pMetrics = pMetrics; }
     void SetLogCallback(LogCallback cb) { m_LogCallback = std::move(cb); }
+    void SetConnectedCallback(ConnectedCallback cb) { m_ConnectedCb = std::move(cb); }
+    void SetActivatedCallback(ActivatedCallback cb) { m_ActivatedCb = std::move(cb); }
+    void SetDisconnectedCallback(DisconnectedCallback cb) { m_DisconnectedCb = std::move(cb); }
 
     // Design Ref: server-status §5.2 — Admin 응답 콜백. AdminPanel 이 등록.
     using AdminSummaryCallback = std::function<void(const ::fastport::protocols::admin::AdminStatusSummaryResponse&)>;
@@ -77,6 +83,7 @@ public:
     void SendEcho(const char* message)
     {
         m_LastSendTime = std::chrono::steady_clock::now();
+        m_SendEchoCount.fetch_add(1, std::memory_order_relaxed);
 
         ::fastport::protocols::tests::EchoRequest request;
         auto pHeader = request.mutable_header();
@@ -94,6 +101,8 @@ public:
     void SetEchoPayload(std::string payload) { m_EchoPayload = std::move(payload); }
 
     uint64_t GetEchoCount() const { return m_EchoCount.load(std::memory_order_relaxed); }
+    // 송신 시도 누적. SendEcho() 호출 시마다 +1. Stress Scenario B 에서 Packets Sent 표시용.
+    uint64_t GetSendEchoCount() const { return m_SendEchoCount.load(std::memory_order_relaxed); }
     bool IsConnected() const noexcept { return m_IsConnected.load(std::memory_order_acquire); }
     bool TryStartEchoLoop(int count)
     {
@@ -108,18 +117,43 @@ public:
 
     void OnConnected() override
     {
-        __super::OnConnected();
         m_IsConnected.store(true, std::memory_order_release);
+        auto self = std::static_pointer_cast<TestSession>(shared_from_this());
+        __super::OnConnected();
+        if (m_ConnectedCb)
+        {
+            m_ConnectedCb(self);
+        }
+        if (m_ActivatedCb)
+        {
+            m_ActivatedCb(self);
+        }
         if (m_pMetrics) m_pMetrics->RecordConnection(true);
         Log("Connected to server");
     }
 
     void OnDisconnected() override
     {
+        [[maybe_unused]] auto keepAlive = std::static_pointer_cast<TestSession>(shared_from_this());
+        const auto sessionId = GetSessionId();
+        auto disconnectedCb = m_DisconnectedCb;
+        auto logCb = m_LogCallback;
+        auto* pMetrics = m_pMetrics;
+
         m_IsConnected.store(false, std::memory_order_release);
         __super::OnDisconnected();
-        if (m_pMetrics) m_pMetrics->RecordConnection(false);
-        Log("Disconnected from server");
+        if (pMetrics)
+        {
+            pMetrics->RecordConnection(false);
+        }
+        if (logCb)
+        {
+            logCb("Disconnected from server");
+        }
+        if (disconnectedCb)
+        {
+            disconnectedCb(sessionId);
+        }
     }
 
     void OnPacketReceived(const LibNetworks::Core::Packet& rfPacket) override
@@ -189,6 +223,7 @@ private:
     std::chrono::steady_clock::time_point m_LastSendTime;
     uint32_t m_NextRequestId = 1;
     std::atomic<uint64_t> m_EchoCount = 0;
+    std::atomic<uint64_t> m_SendEchoCount = 0;
     std::atomic<int> m_RemainingEchos = 0;
     std::atomic<bool> m_IsConnected = false;
 
@@ -197,4 +232,7 @@ private:
 
     AdminSummaryCallback     m_AdminSummaryCb;
     AdminSessionListCallback m_AdminSessionListCb;
+    ConnectedCallback        m_ConnectedCb;
+    ActivatedCallback        m_ActivatedCb;
+    DisconnectedCallback     m_DisconnectedCb;
 };

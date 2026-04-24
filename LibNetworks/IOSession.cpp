@@ -68,10 +68,12 @@ IOSession::~IOSession()
 // # 완료 통지 종료 게이트
 IOSession::IoCompletionGuard::~IoCompletionGuard() noexcept
 {
-    const int previousCount = Self.m_OutstandingIoCount.fetch_sub(1, std::memory_order_acq_rel);
-    if (previousCount == 1 && Self.m_DisconnectRequested.load(std::memory_order_acquire))
+    std::shared_ptr<IOSession> pIOSession = Self; 
+
+    const int previousCount = pIOSession->m_OutstandingIoCount.fetch_sub(1, std::memory_order_acq_rel);
+    if (previousCount == 1 && pIOSession->m_DisconnectRequested.load(std::memory_order_acquire))
     {
-        Self.TryFireOnDisconnected();
+        pIOSession->TryFireOnDisconnected();
     }
 }
 
@@ -517,7 +519,9 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         return;
     }
 
-    IoCompletionGuard guard(*this);
+    auto pIOSession = shared_from_this();
+
+    IoCompletionGuard guard(pIOSession);
 
     // 멤버 Overlapped 주소로 구분
     if (pOverlapped == &(m_RecvOverlapped.Overlapped))

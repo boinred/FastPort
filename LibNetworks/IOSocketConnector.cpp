@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include <spdlog/spdlog.h>
 #include <WinSock2.h>
@@ -10,7 +10,7 @@ import std;
 import commons.logger;
 import networks.services.io_service;
 import networks.core.io_consumer;
-
+import networks.sessions.outbound_session;
 
 namespace LibNetworks::Core
 {
@@ -40,31 +40,71 @@ std::shared_ptr<IOSocketConnector> IOSocketConnector::Create(const std::shared_p
     return pConnector;
 }
 
-
-
 IOSocketConnector::IOSocketConnector(const std::shared_ptr<Services::INetworkService>& pService, OnDoFuncCreateSession pOnDoFuncCreateSession)
     : m_pService(pService), m_pOnDoFuncCreateSession(pOnDoFuncCreateSession)
 {
+}
 
+bool IOSocketConnector::HasTrackedSession() const noexcept
+{
+    std::lock_guard<std::mutex> lock(m_StateMutex);
+    return static_cast<bool>(m_pSession) || !m_wpSession.expired();
+}
+
+void IOSocketConnector::ReleaseSessionAfterActivation() noexcept
+{
+    std::lock_guard<std::mutex> lock(m_StateMutex);
+    if (m_pSession)
+    {
+        m_wpSession = m_pSession;
+        m_pSession.reset();
+    }
+    m_pLifecycleHold.reset();
+}
+
+void IOSocketConnector::ReleaseSessionAfterDisconnect() noexcept
+{
+    std::lock_guard<std::mutex> lock(m_StateMutex);
+    m_pSession.reset();
+    m_wpSession.reset();
+    m_pLifecycleHold.reset();
 }
 
 void IOSocketConnector::DisConnect()
 {
-    if (!m_bConnected)
+    std::shared_ptr<Sessions::INetworkSession> pSession;
+    std::shared_ptr<Socket> pSocket;
+
     {
+        std::lock_guard<std::mutex> lock(m_StateMutex);
+        if (!m_pSession && m_wpSession.expired())
+        {
+            return;
+        }
+
+        pSession = m_pSession ? m_pSession : m_wpSession.lock();
+        pSocket = m_pSocket;
+    }
+
+    if (auto pOutboundSession = std::dynamic_pointer_cast<Sessions::OutboundSession>(pSession))
+    {
+        pOutboundSession->RequestDisconnect(Sessions::DisconnectReason::Normal);
         return;
     }
 
-    m_pSocket->Close();
-    m_bConnected = false;
-    m_pSession = {};
+    if (pSocket)
+    {
+        pSocket->Close();
+    }
+
+    ReleaseSessionAfterDisconnect();
 
     LibCommons::Logger::GetInstance().LogInfo("IOSocketConnector", "IOSocketConnector DisConnected.");
 }
 
-//------------------------------------------------------------------------ 
+//------------------------------------------------------------------------
 
-//------------------------------------------------------------------------ 
+//------------------------------------------------------------------------
 bool IOSocketConnector::Connect(std::string ip, const unsigned short port)
 {
     auto& logger = LibCommons::Logger::GetInstance();
@@ -85,6 +125,38 @@ bool IOSocketConnector::Connect(std::string ip, const unsigned short port)
     }
 
     m_pSession = m_pOnDoFuncCreateSession(m_pSocket);
+    if (!m_pSession)
+    {
+        logger.LogError("SocketConnector", "CreateSession failed.");
+        m_pSocket->Close();
+        return false;
+    }
+
+    m_wpSession = m_pSession;
+    m_pLifecycleHold = shared_from_this();
+    auto pOutboundSession = std::dynamic_pointer_cast<Sessions::OutboundSession>(m_pSession);
+    if (!pOutboundSession)
+    {
+        logger.LogError("SocketConnector", "Connect requires OutboundSession-compatible session.");
+        DisConnect();
+        return false;
+    }
+
+    const auto weakSelf = weak_from_this();
+    pOutboundSession->SetActivationObserver([weakSelf]()
+    {
+        if (auto self = weakSelf.lock())
+        {
+            self->ReleaseSessionAfterActivation();
+        }
+    });
+    pOutboundSession->SetDisconnectObserver([weakSelf]()
+    {
+        if (auto self = weakSelf.lock())
+        {
+            self->ReleaseSessionAfterDisconnect();
+        }
+    });
 
     // 4. IOCP에 소켓 연결 (IOService인 경우에만)
     if (auto pIOService = std::dynamic_pointer_cast<LibNetworks::Services::IOService>(m_pService))
@@ -136,19 +208,28 @@ bool IOSocketConnector::ConnectEx(std::string ip, const unsigned short port)
         return false;
     }
 
+    auto pOutboundSession = std::dynamic_pointer_cast<Sessions::OutboundSession>(m_pSession);
+    if (!pOutboundSession)
+    {
+        logger.LogError("SocketConnector", "ConnectEx requires OutboundSession-compatible session.");
+        return false;
+    }
+
     // 1. Remote 주소 설정
     sockaddr_in remoteAddr{};
     Socket::CreateSocketAddress(remoteAddr, ip, port);
 
+    pOutboundSession->MarkConnectIoPosted();
+
     // 2. ConnectEx 호출
     bool bResult = m_lpfnConnectEx(
-        m_pSocket->GetSocket(),							// 소켓
-        reinterpret_cast<const sockaddr*>(&remoteAddr),	// 서버 주소
-        sizeof(remoteAddr),								// 주소 길이
-        nullptr,										// 전송 버퍼
-        0,												// 전송 버퍼 길이
-        nullptr,										// 실제 전송된 바이트 수
-        m_pSession->GetConnectOverlappedPtr()			// OVERLAPPED 구조체
+        m_pSocket->GetSocket(),                         // 소켓
+        reinterpret_cast<const sockaddr*>(&remoteAddr), // 서버 주소
+        sizeof(remoteAddr),                             // 주소 길이
+        nullptr,                                        // 전송 버퍼
+        0,                                              // 전송 버퍼 길이
+        nullptr,                                        // 실제 전송된 바이트 수
+        pOutboundSession->GetConnectOverlappedPtr()     // OVERLAPPED 구조체
     );
 
     if (!bResult)
@@ -156,6 +237,7 @@ bool IOSocketConnector::ConnectEx(std::string ip, const unsigned short port)
         int nError = ::WSAGetLastError();
         if (ERROR_IO_PENDING != nError)
         {
+            pOutboundSession->UndoConnectIoOnPostFailure();
             logger.LogError("SocketConnector", "ConnectEx failed. Error : {}", nError);
             return false;
         }
@@ -166,8 +248,6 @@ bool IOSocketConnector::ConnectEx(std::string ip, const unsigned short port)
     return true;
 }
 
-
-
-//------------------------------------ 
+//------------------------------------
 
 } // namespace LibNetworks::Core

@@ -1,4 +1,4 @@
-export module benchmark.runner;
+﻿export module benchmark.runner;
 
 import std;
 import benchmark.stats;
@@ -12,7 +12,7 @@ export struct BenchmarkConfig
 {
     std::string testName = "Default";
     std::string serverHost = "127.0.0.1";
-    uint16_t serverPort = 9000;
+    uint16_t serverPort = 6628;
     
     size_t iterations = 10000;          // 반복 횟수
     size_t warmupIterations = 100;      // 워밍업 횟수

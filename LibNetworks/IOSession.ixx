@@ -76,6 +76,7 @@ public:
     }
 
     // Design Ref: session-idle-timeout §4.2 — 사유 파라미터 오버로드.
+    // 
     // IIdleAware::RequestDisconnect 구현. 내부적으로 기존 RequestDisconnect() 경로와 통합.
     void RequestDisconnect(DisconnectReason reason) override;
 
@@ -83,6 +84,18 @@ public:
     void RequestDisconnect();
 
 protected:
+    // # outstanding I/O 증가 (외부 posting 포함)
+    void AddOutstandingIo() noexcept
+    {
+        m_OutstandingIoCount.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    // # disconnect 상태 조회
+    bool IsDisconnectRequested() const noexcept
+    {
+        return m_DisconnectRequested.load(std::memory_order_acquire);
+    }
+
     // # 종료 콜백 단일 발화
     void TryFireOnDisconnected();
 
@@ -152,8 +165,8 @@ protected:
     // # 완료 통지 수명 보호
     struct IoCompletionGuard
     {
-        IOSession& Self;
-        explicit IoCompletionGuard(IOSession& s) noexcept : Self(s) {}
+        std::shared_ptr<IOSession> Self;
+        explicit IoCompletionGuard(std::shared_ptr<IOSession>& s) noexcept : Self(s) {}
         ~IoCompletionGuard() noexcept;
         IoCompletionGuard(const IoCompletionGuard&) = delete;
         IoCompletionGuard& operator=(const IoCompletionGuard&) = delete;
@@ -187,6 +200,7 @@ private:
     // Send 완료 처리 분기.
     void HandleSendCompletion(bool bSuccess, DWORD bytesTransferred);
 
+protected:
     // # posting 실패 카운터 복구
     void UndoOutstandingOnFailure(const char* site) noexcept;
 
