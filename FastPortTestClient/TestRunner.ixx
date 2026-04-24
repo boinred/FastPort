@@ -304,22 +304,10 @@ public:
 
         m_StressBuildUpDone.store(false, std::memory_order_relaxed);
 
-        // 남아있는 stress 연결 정리.
-        std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> toDrop;
-        {
-            std::lock_guard<std::mutex> lock(m_StressMutex);
-            PruneStressConnectorsLocked();
-            toDrop = m_StressConnectors;
-        }
-        for (auto& c : toDrop) { if (c) c->DisConnect(); }
-
-        WaitForStressSessionsDrained();
-
-        {
-            std::lock_guard<std::mutex> lock(m_StressMutex);
-            PruneStressConnectorsLocked();
-            m_StressConnectors.clear();
-        }
+        // Defensive — thread 가 자연 종료한 경우 StressMain 이 이미 drain 을 수행했다.
+        // 그래도 Stop 이 scenario 실행 전에 불렸거나 예외 경로가 있을 수 있어 idempotent 재호출.
+        // m_StressSessions / m_StressConnectors 가 이미 비어있으면 본 호출은 즉시 복귀.
+        DisconnectAllStressAndWaitDrain();
     }
 
     const StressStats& GetStressStats() const { return m_StressStats; }
@@ -513,6 +501,28 @@ private:
         }
     }
 
+    // 모든 stress connector 를 DisConnect 요청하고 세션 drain 까지 대기하는 공통 cleanup.
+    // StressMain 자연 종료 경로와 StopStressMode 양쪽에서 호출되며 idempotent.
+    // (m_StressSessions / m_StressConnectors 가 이미 비어있으면 즉시 복귀.)
+    void DisconnectAllStressAndWaitDrain()
+    {
+        std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> toDrop;
+        {
+            std::lock_guard<std::mutex> lock(m_StressMutex);
+            PruneStressConnectorsLocked();
+            toDrop = m_StressConnectors;
+        }
+        for (auto& c : toDrop) { if (c) c->DisConnect(); }
+
+        WaitForStressSessionsDrained();
+
+        {
+            std::lock_guard<std::mutex> lock(m_StressMutex);
+            PruneStressConnectorsLocked();
+            m_StressConnectors.clear();
+        }
+    }
+
     void WaitForStressSessionsDrained()
     {
         using namespace std::chrono_literals;
@@ -616,6 +626,11 @@ private:
 
     // Design Ref: iosession-lifetime-race §5 — Stress scenario dispatcher (v0.2).
     // A/B/C 시나리오 별 main loop 를 분기 호출. running 플래그는 여기서 일괄 해제.
+    //
+    // [UX 정합성]: 자연 종료(duration 만료 등) 시에도 남아있는 모든 stress connector 에
+    // DisConnect + drain 대기를 수행한 후에야 running=false 로 내린다. 이를 생략하면
+    // UI 가 "Start Stress" 로 전환되는 시점에 75+ 세션이 유휴 상태로 leak 되어 있을 수
+    // 있고, 사용자는 외부에서 해당 세션을 정리할 수단이 없게 된다.
     void StressMain(std::string ip, int port, StressConfig cfg)
     {
         m_CurrentStressScenario = cfg.scenario;
@@ -625,6 +640,12 @@ private:
         case StressScenario::Burst:    StressMain_Burst(ip, port, cfg);    break;
         case StressScenario::Combined: StressMain_Combined(ip, port, cfg); break;
         }
+
+        // 자연 종료 / StopStressMode 유도 종료 공통 cleanup. 본 경로에서 drain 이 끝난
+        // 이후에야 running=false 를 공개한다 — 그렇지 않으면 StopStressMode 가
+        // m_StressThread.join() 리턴한 시점에도 세션이 여전히 outstanding 상태일 수 있다.
+        DisconnectAllStressAndWaitDrain();
+
         m_StressStats.running.store(false, std::memory_order_release);
         m_StressBuildUpDone.store(false, std::memory_order_relaxed);
     }
@@ -697,8 +718,8 @@ private:
                 std::memory_order_relaxed);
         }
 
-        // Phase 3: 자연 종료 (연결 유지 — 사용자가 StopStressMode 호출 시 cleanup).
-        // running flag 는 dispatcher (StressMain) 에서 일괄 해제.
+        // Phase 3: 자연 종료 — StressMain 이 DisconnectAllStressAndWaitDrain 으로
+        // 모든 connector 에 DisConnect + drain 을 수행한 뒤 running flag 를 해제한다.
     }
 
     // Design Ref: iosession-lifetime-race §5.2 Scenario B — Burst 1M × N round.
@@ -780,7 +801,8 @@ private:
             }
         }
 
-        // 자연 종료 — 사용자가 StopStressMode 호출 시 cleanup. running flag 는 dispatcher 에서 해제.
+        // 자연 종료 — StressMain 이 DisconnectAllStressAndWaitDrain 으로 세션 정리 후
+        // running flag 를 해제한다.
     }
 
     // Design Ref: iosession-lifetime-race §5.2 Scenario C — Combined.

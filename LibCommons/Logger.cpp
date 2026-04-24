@@ -1,4 +1,4 @@
-module;
+﻿module;
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/async.h>
@@ -11,90 +11,69 @@ module commons.logger;
 namespace LibCommons
 {
 
-void Logger::Create(const std::string directoryName, const std::string fileName, const int maxFileSize, const int maxFileCount, const bool bServiceMode)
-{
-    m_bServiceMode = bServiceMode;
+	void Logger::Create(const std::string directoryName, const std::string fileName, const int maxFileSize, const int maxFileCount, const bool bServiceMode)
+	{
+		m_bServiceMode = bServiceMode;
 
-    // File existence check
-    std::filesystem::path directoryPath = directoryName;
+		// File existence check
+		std::filesystem::path directoryPath = directoryName;
 
-    if (!std::filesystem::exists(directoryPath))
-    {
-        if (!std::filesystem::create_directory(directoryPath))
-        {
-            std::cout << "Create directory failed." << directoryPath << std::endl;
-        }
-    }
-
-
-    // 1. Initialize thread pool
-    spdlog::init_thread_pool(8192, 1); // Queue size 8192, 1 thread
-
-    // 2. Set pattern
-    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S] [%n] [%^%l%$] [thread %t] %v");
-
-    m_FileName = std::format("{}/{}", directoryName, fileName);
+		if (!std::filesystem::exists(directoryPath))
+		{
+			if (!std::filesystem::create_directory(directoryPath))
+			{
+				std::cout << "Create directory failed." << directoryPath << std::endl;
+			}
+		}
 
 
-    const auto C_MAX_FILE_SIZE = 1024 * 1024 * 10;   // 10MB
-    // 2. Set sink
-    m_pCreatedSilk = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(m_FileName, C_MAX_FILE_SIZE, 5, false);
+		// 1. Initialize thread pool
+		spdlog::init_thread_pool(8192, 1); // Queue size 8192, 1 thread
 
-    if (!m_bServiceMode)
-    {
-        std::shared_ptr<spdlog::logger> pConsoleLogger = spdlog::stderr_color_mt("console", spdlog::color_mode::automatic);
-        pConsoleLogger->set_level(spdlog::level::debug);
+		// 2. Set pattern
+		spdlog::set_pattern("[%Y-%m-%d %H:%M:%S] [%n] [%^%l%$] [thread %t] %v");
 
-        m_pConsoleLogger = pConsoleLogger;
-    }
-}
+		m_FileName = std::format("{}/{}", directoryName, fileName);
 
-void Logger::Shutdown()
-{
-    spdlog::apply_all([&](auto pLogger) { pLogger->info("end of files"); });
 
-    spdlog::shutdown();
-}
+		const auto C_MAX_FILE_SIZE = 1024 * 1024 * 10;   // 10MB
+		// 2. Set sink
+		m_pCreatedSilk = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(m_FileName, C_MAX_FILE_SIZE, 5, false);
 
-void Logger::AddCategory(const std::string& categoryName)
-{
-    bool bFound = false;
+		if (!m_bServiceMode)
+		{
+			std::shared_ptr<spdlog::logger> pConsoleLogger = spdlog::stderr_color_mt("console", spdlog::color_mode::automatic);
+			pConsoleLogger->set_level(spdlog::level::debug);
 
-    if (ReadLockBlock(m_Lock))
-    {
-        const auto iter = m_Categories.find(categoryName);
-        if (iter != m_Categories.end())
-        {
-            bFound = true;
-        }
-    }
+			m_pConsoleLogger = pConsoleLogger;
+		}
+	}
 
-    if (bFound)
-    {
-        return;
-    }
+	void Logger::Shutdown()
+	{
+		spdlog::apply_all([&](auto pLogger) { pLogger->info("end of files"); });
 
-    if (WriteLockBlock(m_Lock))
-    {
-        auto insertResult = m_Categories.insert(categoryName);
-        bFound = !insertResult.second;
-    }
+		spdlog::shutdown();
+	}
 
-    if (bFound)
-    {
-        return;
-    }
+	void Logger::AddCategory(const std::string& categoryName)
+	{
+		auto lock = WriteLockBlock(m_Lock);
 
-    // Create asynchronous logger
-    auto pLogger = std::make_shared<spdlog::async_logger>(categoryName, m_pCreatedSilk, spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+		if (m_Categories.contains(categoryName) || spdlog::get(categoryName))
+			return;
+
+		// 
+		auto pLogger = std::make_shared<spdlog::async_logger>(
+			categoryName, m_pCreatedSilk, spdlog::thread_pool(),
+			spdlog::async_overflow_policy::block);
+
 #if _DEBUG
-    pLogger->set_level(spdlog::level::debug);
+		pLogger->set_level(spdlog::level::debug);
 #else 
-    pLogger->set_level(spdlog::level::info);
+		pLogger->set_level(spdlog::level::info);
 #endif // #if _DEBUG
-
-    spdlog::register_logger(pLogger);
-}
-
-
+		spdlog::register_logger(pLogger);
+		m_Categories.insert(categoryName);
+	}
 } // namespace LibCommons
