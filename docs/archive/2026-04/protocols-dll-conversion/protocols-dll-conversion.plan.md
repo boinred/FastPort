@@ -7,8 +7,8 @@
 > **Author**: AnYounggun
 > **Date**: 2026-04-24
 > **Status**: Draft
-> **PRD**: [protocols-dll-conversion.prd.md](../../00-pm/protocols-dll-conversion.prd.md)
-> **Design**: [protocols-dll-conversion.design.md](../../02-design/features/protocols-dll-conversion.design.md)
+> **PRD**: [protocols-dll-conversion.prd.md](../../../00-pm/protocols-dll-conversion.prd.md)
+> **Design**: [protocols-dll-conversion.design.md](./protocols-dll-conversion.design.md)
 
 ---
 

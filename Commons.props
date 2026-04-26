@@ -10,7 +10,11 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions>_WIN32_WINNT=0x0602;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- Design Ref: protocols-dll-conversion §4 — PROTOCOLS_API 매크로를 모든 consumer
+           및 Protocols 자신에게 강제 주입 (Forced Include). Protocols 빌드 시
+           PROTOCOLS_EXPORTS 가 vcxproj 에 정의 → __declspec(dllexport), consumer 빌드 시
+           PROTOCOLS_EXPORTS 없음 → __declspec(dllimport) 자동 분기. -->
+      <AdditionalOptions>/utf-8 /FI"$(SolutionDir)Protocols\ProtocolsAPI.h" %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <BuildStlModules>true</BuildStlModules>
