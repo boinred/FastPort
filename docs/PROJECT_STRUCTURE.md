@@ -119,7 +119,7 @@ FastPort/
 
 ## 📦 Protocols / Protos
 
-Protocol Buffers 정의 및 생성 파일
+Protocol Buffers 정의 및 생성 파일. **`Protocols` 는 v0.2 부터 Dynamic Library (`Protocols.dll` + import lib `Protocols.lib`)** 로 빌드된다. 이는 Protobuf 전역 `DescriptorPool` 에 동일 descriptor 가 프로세스당 **한 번만** 등록되도록 보장하기 위함이다. 자세한 전환 배경은 `docs/00-pm/protocols-dll-conversion.prd.md` 참조.
 
 ### Protos (원본 .proto)
 
@@ -127,15 +127,29 @@ Protocol Buffers 정의 및 생성 파일
 |------|------|
 | `Commons.proto` | 공통 메시지 정의 |
 | `Tests.proto` | 테스트용 메시지 정의 |
+| `Admin.proto` | Admin 프로토콜 |
+| `Benchmark.proto` | 벤치마크 프로토콜 |
 
-### Protocols (생성된 파일)
+### Protocols (Dynamic Library 산출)
+
+| 빌드 결과 | 배치 경로 | 역할 |
+|---|---|---|
+| `Protocols.dll` | `_Builds/x64/{Debug,Release}/` | 런타임 descriptor singleton 제공. 모든 consumer 가 import |
+| `Protocols.lib` | `_Builds/x64/{Debug,Release}/` | Import library — 링크 시점에 각 consumer 가 참조 |
+| `ProtocolsAPI.h` | `Protocols/` | `PROTOCOLS_API` export/import 매크로. `Commons.props` 의 `/FI` Forced Include 로 자동 주입 |
+
+### 주요 생성 파일 (빌드 시 재생성)
 
 | 파일 | 설명 |
 |------|------|
-| `Tests.pb.h` | 생성된 헤더 파일 |
-| `Tests.pb.cc` | 생성된 구현 파일 |
-| `Commons.pb.h` | 생성된 헤더 파일 |
-| `Commons.pb.cc` | 생성된 구현 파일 |
+| `{Name}.pb.h` / `{Name}.pb.cc` | Protobuf 메시지 생성 코드 (dllexport_decl 주석 포함) |
+| `{Name}.grpc.pb.h` / `{Name}.grpc.pb.cc` | gRPC 스텁 생성 코드 |
+
+### 새 `.proto` 추가 워크플로우
+
+1. `Protos/` 에 `.proto` 파일 추가
+2. `Protocols/Protocols.vcxproj` 의 `<CustomBuild>` + `<ClCompile>` / `<ClInclude>` 에 4개 생성물 명시 (pb + grpc.pb × h + cc)
+3. `Protocols.dll` 만 재빌드하면 모든 consumer 가 자동 갱신 (link 시간 단축 효과)
 
 ---
 

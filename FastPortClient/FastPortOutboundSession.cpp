@@ -30,10 +30,10 @@ FastPortOutboundSession::~FastPortOutboundSession()
 
 void FastPortOutboundSession::OnConnected()
 {
+    auto self = std::static_pointer_cast<FastPortOutboundSession>(shared_from_this());
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
-    sessions.Add(GetSessionId(), std::dynamic_pointer_cast<FastPortOutboundSession>(shared_from_this()));
-
     __super::OnConnected();
+    sessions.Add(GetSessionId(), self);
 
     std::string msg = "Hello FastPort Server!";
 
@@ -50,10 +50,12 @@ void FastPortOutboundSession::OnConnected()
 
 void FastPortOutboundSession::OnDisconnected()
 {
-    __super::OnDisconnected();
-
+    [[maybe_unused]] auto keepAlive = std::static_pointer_cast<FastPortOutboundSession>(shared_from_this());
+    const auto sessionId = GetSessionId();
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
-    sessions.Remove(GetSessionId());
+
+    __super::OnDisconnected();
+    sessions.Remove(sessionId);
 }
 
 void FastPortOutboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPacket)

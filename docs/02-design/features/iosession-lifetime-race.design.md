@@ -1,12 +1,13 @@
 # iosession-lifetime-race Design Document
 
-> **Summary**: IOCP/RIO worker 의 use-after-free 를 Outstanding-I/O self-retain 으로 해결. Option C (Pragmatic) — posting 직전 `SelfRetain = shared_from_this()`, completion 진입 즉시 `auto self = std::move(...)` 한 줄로 lifecycle 보장.
+> **Summary**: IOCP worker 의 UAF 를 **Outstanding I/O Counter + Drain-before-Remove** 패턴으로 근본 해결. Session 의 단일 owner = container. Remove 시점 = 유일한 결정적 소멸 시점. `IOSession::m_OutstandingIoCount` (atomic) 로 pending I/O 수 추적, RAII `IoCompletionGuard` 로 decrement 보장, `m_bDisconnecting` CAS 로 `shutdown+close` 멱등, `m_bOnDisconnectedFired` CAS 로 last-completion 에서 `OnDisconnected` 정확히 1회 fire. **v0.3 — SelfRetain 패턴 기각**.
 >
 > **Project**: FastPort
-> **Author**: AnYounggun
-> **Date**: 2026-04-21
-> **Status**: Draft
-> **Planning Doc**: [iosession-lifetime-race.plan.md](../../01-plan/features/iosession-lifetime-race.plan.md)
+> **Author**: An Younggun
+> **Date**: 2026-04-22
+> **Status**: Draft (v0.3.1)
+> **Planning Doc**: [iosession-lifetime-race.plan.md](../../01-plan/features/iosession-lifetime-race.plan.md) (v0.3)
+> **Parent Feature**: [iocp-game-server-engine](../../01-plan/features/iocp-game-server-engine.plan.md)
 
 ---
 
@@ -14,11 +15,11 @@
 
 | Key | Value |
 |-----|-------|
-| **WHY** | 3000 conn stress 에서 confirmed use-after-free 크래시 (freed heap fill 증거). 런타임 안정성 직결 — 프로덕션/장기 배포 블로커. |
-| **WHO** | FastPort 엔진 유지보수자. 간접적으로 모든 FastPort 기반 게임/서비스. |
-| **RISK** | 세션 lifetime 구조 변경이 기존 `RequestDisconnect` / `OnDisconnected` 흐름과 충돌, 순환 참조로 세션 영원히 소멸 안 됨, shared_ptr ref-count 경합으로 인한 성능 저하. |
-| **SUCCESS** | 10k conn × 5분 stress 중 UAF 크래시 0회 (Debug·Release 양쪽), 64개 기존 L1 회귀 0, 기능 외부 동작 무변화, 세션 destruct 정상 발생 (leak 0). |
-| **SCOPE** | IOCP `IOSession` + RIO `RIOSession` 양쪽 동시 수정. `IIOConsumer` 인터페이스 불변. 10k conn stress reproducer 도구 포함. |
+| **WHY** | Stress 에서 confirmed UAF (2026-04-22 증거: `bResult=TRUE` 정상 completion 인데 `pConsumer=0xFFFFFFFFFFFFFFFF` — session heap + VM 페이지 반환된 깊이의 race). 상위 `iocp-game-server-engine` v1 SC-3 블로커 + M2e 선행. |
+| **WHO** | FastPort 엔진 유지보수자. 간접적으로 한국 C++ 인디/미드코어 게임 서버팀. |
+| **RISK** | ① Posting 실패 경로 counter 미복구 drift ② OnIOCompleted early return 에서 decrement 누락 ③ OnDisconnected 중복 호출 ④ atomic overhead 로 P99 80µs 영향 ⑤ drain 무한 지연 ⑥ shutdown(SD_BOTH) completion 미배송 ⑦ Counter Send/Recv 합쳐져 디버깅 어려움 |
+| **SUCCESS** | Stress A/B/C × Debug/Release UAF 0회, 기존 64 회귀 0, 3k idle ≤3% 감소, P99 regression ≤5µs, 세션 leak 0, destruct 로그 순서 = container.Remove 이후. |
+| **SCOPE** | IOCP `IOSession` 만. RIO v1.1 분리. `IIOConsumer` 불변. Counter = 단일 atomic<int>, 모든 I/O 통합. |
 
 ---
 
@@ -26,18 +27,22 @@
 
 ### 1.1 Design Goals
 
-- IOCP/RIO worker 가 raw `this` pointer 로 dispatch 하는 기존 구조를 유지하면서도, I/O 가 pending 인 동안 세션 객체가 **절대로 소멸되지 않도록** 보장한다.
-- 새 클래스·인터페이스 추가 없이 **표준 `shared_ptr` + move semantics** 로 lifecycle invariant 를 표현한다.
-- IOCP 와 RIO 양쪽에 **동일 패턴**을 적용해 대칭 유지, 미래 확장 시 복제 용이.
-- 성능 오버헤드 최소화 — atomic ref-count 조작은 I/O posting 당 1~2회 (실무상 3000 conn × 1Hz ≈ 6k ops/s, 무시 가능).
+1. **Session 의 단일 owner = container** — session 이 container 에 등록되어 있는 동안만 alive. Remove 되면 즉시 `~IOSession`.
+2. **Late completion 0 건** — `~IOSession` 호출 시점에는 반드시 `m_OutstandingIoCount == 0`. IOCP worker 가 freed session 에 access 하는 경로 제거.
+3. **Remove 호출은 IOSession 자신이 수행** — `OnDisconnected()` 내부에서 container.Remove(sessionId). session 이 자기 여정을 스스로 마친다.
+4. **RequestDisconnect 비동기 + 멱등** — admin kick / idle timeout / Error 감지 / 사용자 요청 어느 경로에서 호출해도 동일 효과. 호출자 non-blocking.
+5. **RAII 로 counter 관리 누락 불가능** — `IoCompletionGuard` scope-exit 로 early return / throw 모두 자동 decrement.
+6. **상위 v1 의 P99 80µs 타깃 보호** — atomic ops ≤ 10ns × 2, 무시 가능 수준으로 측정 확인.
+7. **SelfRetain 패턴 명시적 기각** — 각 I/O 마다 shared_ptr 복제는 "언제 destruct 되는가" 의 단일 답을 파괴한다. 본 Design 은 그 접근을 채택하지 않는다.
 
 ### 1.2 Design Principles
 
-1. **Lifetime invariant 를 코드 한 줄로 표현** — `auto self = std::move(m_RecvOverlapped.SelfRetain);` 만 봐도 "이 함수 종료까지 세션 alive" 를 이해 가능.
-2. **Exit-path 추적 금지** — early return 이 6~10개 있어도, `std::shared_ptr` destructor 가 자동 drop.
-3. **Posting 실패만 inline reset** — 완료 통지 안 올 것이므로 보류하면 안 됨 (3곳).
-4. **Invariant breakage 조기 발견** — session destruct 로그로 outstanding I/O count 관찰.
-5. **Production 코드 스타일 일관성** — 기존 FastPort 네이밍·모듈 규약·`LibCommons::Logger` 그대로 사용.
+1. **Lifetime invariant 를 atomic 변수 3개로 표현** — `m_OutstandingIoCount`, `m_bDisconnecting`, `m_bOnDisconnectedFired`. 세 값의 조합이 session state machine 의 유일한 진실.
+2. **Exit-path 추적 금지** — `IoCompletionGuard` RAII 로 OnIOCompleted 의 어떤 return/throw 에서든 자동 decrement.
+3. **Posting 실패만 inline undo** — completion 안 올 것이므로 즉시 fetch_sub 복구 + last-check.
+4. **Invariant breakage 조기 발견** — `~IOSession` 에서 counter==0 assert + ERROR 로그.
+5. **CAS 로 멱등성 확보** — RequestDisconnect 와 OnDisconnected fire 둘 다 `compare_exchange_strong` 기반 1회 통과.
+6. **Production 코드 스타일 일관성** — CLAUDE.md 네이밍·모듈·Logger 규약 그대로.
 
 ---
 
@@ -45,166 +50,273 @@
 
 ### 2.0 Architecture Comparison
 
-| Criteria | Option A: Minimal | Option B: Clean | **Option C: Pragmatic** |
+| Criteria | Option A: Minimal inline counter | Option B: External Gate class | **Option C: IOSession-internal counter + RAII + CAS** |
 |---|:-:|:-:|:-:|
-| Approach | Inline retain/reset 각 exit 명시 | RAII `ScopedIoRetain` 헬퍼 | move-out 한 줄로 lifecycle 자동 |
-| New Files | 0 | 1 (헬퍼) | 0 |
-| Modified Files | 4 (IOSession/RIOSession × 2) | 5 (헬퍼 + 위 4) | **4** |
-| Complexity | Low | High | **Medium** |
-| Maintainability | Medium (reset 누락 리스크) | High (RAII) | **High (move semantics)** |
-| Effort | Medium (exit path 매핑) | High | **Low** |
-| Risk | High (누락) | Low (과설계 우려) | **Minimal** |
+| Approach | IOSession 내부에 atomic field + 각 site 수동 fetch | 별도 `PendingIoGate` 헬퍼 클래스 분리 | IOSession field + `IoCompletionGuard` RAII + helper method |
+| New Files | 0 | 1 | 0 |
+| Modified Files | 2 | 3 | **2** |
+| Complexity | Low | Medium | **Low-Medium** |
+| Maintainability | Low (누락 리스크) | High | **High (RAII + 캡슐화)** |
+| Effort | Medium | High | **Low** |
+| Risk | High (수동 decrement 누락) | Low (과설계) | **Low** |
 
-**Selected**: **Option C — Pragmatic** (Checkpoint 3: user 선택)
+**Selected**: **Option C — IOSession-internal counter + RAII `IoCompletionGuard` + CAS**
 
-**Rationale**: Recv/Send 분기의 exit path 가 총 10개 전후 — A 는 누락 리스크, B 는 새 클래스 도입이 FastPort 스타일(C++20 + 명시 흐름) 과 괴리. C 는 표준 `std::shared_ptr` + `std::move` 로 lifecycle 자동화, 추가 추상 0개, 코드 변경 최소.
-
----
+**Rationale**: Session state 는 session 자신이 소유해야 하므로 외부 Gate 분리는 과설계. 수동 fetch 는 OnIOCompleted 의 6~10개 exit path 에서 누락 리스크. RAII scope-exit 로 decrement 를 한 곳에 고정 + `m_bDisconnecting` / `m_bOnDisconnectedFired` CAS 조합으로 멱등성 확보. v0.3 Plan 과 1:1.
 
 ### 2.1 Component Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                          IOCP 경로                                │
-│                                                                  │
-│   IOService worker                                               │
-│   ──────────────                                                 │
-│   GetQueuedCompletionStatus → (key = raw IOSession*)             │
-│       ↓                                                          │
-│   IIOConsumer::OnIOCompleted  ◀── 인터페이스 불변                │
-│       ↓                                                          │
-│   IOSession::OnIOCompleted                                       │
-│     ├─ Recv 분기:  auto self = move(m_RecvOverlapped.SelfRetain) │
-│     │    └ (기존 로직 그대로, 모든 early return 에서 self 자동 drop)│
-│     └─ Send 분기:  auto self = move(m_SendOverlapped.SelfRetain) │
-│          └ (동일)                                                │
-│                                                                  │
-│   IOSession::RequestRecv / TryPostSendFromQueue                  │
-│     ├─ m_*Overlapped.SelfRetain = shared_from_this();            │
-│     ├─ ::WSARecv / ::WSASend(...)                                │
-│     └─ 실패 시 inline reset(), pending/success 는 retain 유지    │
-├──────────────────────────────────────────────────────────────────┤
-│                          RIO 경로                                │
-│                                                                  │
-│   RIOService completion loop                                     │
-│   ─────────────────────                                          │
-│   (RIO_CQ dequeue) → requestContext (raw RIOSession*)            │
-│       ↓                                                          │
-│   RIOSession::OnRioIOCompleted                                   │
-│     ├─ Send 완료: auto self = move(m_SendContext.SelfRetain)     │
-│     └─ Recv 완료: auto self = move(m_RecvContext.SelfRetain)     │
-│                                                                  │
-│   RIOSession::RequestRecv / Send posting                         │
-│     ├─ m_*Context.SelfRetain = shared_from_this();               │
-│     ├─ RIOReceive / RIOSend                                      │
-│     └─ 실패 시 inline reset                                      │
-└──────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│         Target IOCP Session Lifetime Path (post-activation)        │
+│                                                                    │
+│  Activation entry (out of main drain path):                        │
+│   - Inbound : Accept 완료 → OnAccepted() → container handoff       │
+│   - Outbound: ConnectEx 완료 → OnConnected() → container handoff   │
+│                                                                    │
+│  IOService worker                                                  │
+│  ──────────────                                                    │
+│  GetQueuedCompletionStatus → (completion key = raw IIOConsumer*)   │
+│      ↓                                                             │
+│  session-path completion 인 경우                                   │
+│      ↓                                                             │
+│  IOSession::OnIOCompleted                                          │
+│    └ IoCompletionGuard guard{*this}   ← scope-exit decrement       │
+│      └ fetch_sub(1) → prev==1 && disconnectRequested               │
+│                                   ↓                                │
+│                           TryFireOnDisconnected()                  │
+│                                   ↓                                │
+│                      m_bOnDisconnectedFired CAS                    │
+│                                   ↓                                │
+│                      OnDisconnected() (virtual)                    │
+│                                   ↓                                │
+│                      container.Remove(sessionId)                   │
+│                                   ↓                                │
+│                      container owner release                       │
+│                                   ↓                                │
+│                      ~IOSession() (deterministic)                  │
+│                                                                    │
+│  IOSession::RequestRecv / TryPostSendFromQueue                     │
+│    ├─ fetch_add(1)                                                 │
+│    ├─ ::WSARecv / ::WSASend(...)                                   │
+│    └─ 실패(non-PENDING) 시 fetch_sub(1) + 복구                     │
+│                                                                    │
+│  IOSession::RequestDisconnect (idempotent, async)                  │
+│    ├─ disconnectRequested CAS (first pass only)                    │
+│    ├─ ::shutdown(SD_BOTH)                                          │
+│    ├─ ::closesocket()                                              │
+│    └─ return; remaining completion drain 은 worker path 담당       │
+└────────────────────────────────────────────────────────────────────┘
+
+[RIO 경로 — 본 v1 에서는 변경 없음. v1.1 `riosession-lifetime-race` 로 분리]
 ```
 
-### 2.2 Data Flow
+### 2.2 State Transition
 
 ```
-  accept / connect
-      ↓
-  session = make_shared<IOSession>
-  sessions.Add(id, session)        ← shared_ptr 1개 (container)
-      ↓
-  RequestReceived()
-   └ RequestRecv(true)
-       └ SelfRetain = shared_from_this()   ← shared_ptr 2개 (container + SelfRetain)
-         WSARecv posted
-
-  … 시간 경과 …
-
-  [다른 스레드] RequestDisconnect
-   └ Shutdown+Close → 기존 pending WSARecv 실패 완료 예약
-   └ OnDisconnected → sessions.Remove(id)   ← container 제거, shared_ptr 1개로 감소
-                                              (SelfRetain 이 아직 쥐고 있으므로 alive)
-
-  [IOCP worker] GetQueuedCompletionStatus 로 pending 실패 완료 dequeue
-      ↓
-  IOSession::OnIOCompleted(false, …, &m_RecvOverlapped.Overlapped)
-      ↓
-  auto self = move(m_RecvOverlapped.SelfRetain);   ← shared_ptr 이동
-    (bSuccess=false → RequestDisconnect(이미 CAS true 므로 no-op), return)
-      ↓
-  함수 종료 → self drop → shared_ptr 0 개 → ~IOSession() 안전 호출
+┌─────────────────────────────────────────────────────────────────────┐
+│                      IOSession Life-cycle States                    │
+│                                                                     │
+│  state = (OutstandingIoCount, DisconnectRequested, OnDisconnectedFired) │
+│                                                                     │
+│  S0: PreActivation     (0, false, false)                            │
+│       │ inbound : accept 완료                                       │
+│       │ outbound: connect 완료 + transport activation               │
+│       ↓                                                             │
+│  S1: Activated         (0, false, false)                            │
+│       │ container handoff 완료                                      │
+│       │ StartReceiveLoop / 앱 트래픽 시작 가능                      │
+│       ↓                                                             │
+│  S2: Active            (N>=0, false, false)                         │
+│       │ posting ↔ completion cycle                                  │
+│       │ RequestDisconnect(admin / idle / error / user)              │
+│       ↓                                                             │
+│  S3: DisconnectRequested (N>=0, true, false)                        │
+│       │ shutdown+close 시작                                          │
+│       │ N>0 이면 pending completion drain                           │
+│       │ N==0 이면 zero-pending fast path                            │
+│       ↓                                                             │
+│  S4: DisconnectReady   (0, true, false)                             │
+│       │ TryFireOnDisconnected()                                     │
+│       │ m_bOnDisconnectedFired CAS (first pass)                     │
+│       ↓                                                             │
+│  S5: FiringOnDisc      (0, true, true)                              │
+│       │ OnDisconnected() 호출 → container.Remove(id)                │
+│       ↓                                                             │
+│  S6: Removed           [container 의 shared_ptr drop]                │
+│       │ external ref 없음                                           │
+│       ↓                                                             │
+│  S7: Destructed        [~IOSession() 실행 → assert count==0]         │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+### 2.2.1 Operational Lifecycle Contract
+
+위 state machine 은 단순히 `counter` 변화만 설명하는 그림이 아니라, **owner / readiness /
+disconnect 책임**을 함께 잠그는 운영 계약으로 해석해야 한다.
+
+#### A. Ownership Handoff
+
+| Phase | Primary Owner | Notes |
+|---|---|---|
+| Constructed / Pre-activation | acceptor / connector / caller | 아직 container 소유가 아니다. 이 구간은 transport 활성화 준비 단계다. |
+| Activated | container | Inbound 는 `OnAccepted()`, Outbound 는 `OnConnected()` 시점에 `shared_from_this()` 로 container 에 handoff 한다. |
+| Disconnecting / Draining | container | owner 는 여전히 container 하나다. pending I/O 만 drain 한다. |
+| Removed | none | `OnDisconnected() -> container.Remove(id)` 이후 마지막 shared_ptr 이 drop 되면 즉시 `~IOSession()` 으로 간다. |
+
+**Rule O1**: steady-state owner 는 항상 container 하나다. acceptor / connector / factory 가
+hand-off 이후 reference 를 오래 쥐고 있으면 deterministic destruction 이 흐려진다.
+
+**Rule O2**: `OnDisconnected()` 는 "정리 콜백"이 아니라 **유일한 제거 진입점**으로 취급한다.
+이 경로 밖에서 임의 Remove / erase 를 호출하는 설계는 금지한다.
+
+#### B. Readiness Is Separate From Lifetime
+
+`alive` 와 `ready-to-send/recv` 는 같은 개념이 아니다.
+
+| Axis | Meaning | Example |
+|---|---|---|
+| Lifetime | 객체가 아직 유효하고 container 가 owner 인가 | `m_OutstandingIoCount`, `m_DisconnectRequested`, `m_bOnDisconnectedFired` 조합 |
+| Readiness | transport activation 이 완료되어 앱 트래픽을 시작해도 되는가 | Outbound 는 `ConnectEx` 완료 + `UpdateConnectContext` + `OnConnected()` 이후 |
+
+**Rule R1**: outbound session 은 `OnConnected()` 이전에 앱 payload 송신을 시작하면 안 된다.
+연결 완료 전 send 가능성은 lifetime 문제가 아니라 readiness 위반이다.
+
+**Rule R2**: inbound / outbound 모두 `StartReceiveLoop()` 시작 시점은 activation 완료 후로
+고정한다. "객체가 살아있다"는 이유만으로 송수신 가능 상태로 간주하지 않는다.
+
+#### C. Disconnect Contract
+
+`RequestDisconnect()` 는 단순 close helper 가 아니라, session 을 `Active -> Disconnecting`
+으로 보내는 **유일한 상태 전이 API**다.
+
+| Phase | Allowed Work | Forbidden Work |
+|---|---|---|
+| Active (`disconnect=false`) | 새 recv/send posting, packet 처리, 상위 feature 트래픽 시작 | 없음 |
+| Disconnecting (`disconnect=true`, `outstanding>0`) | 기존 pending I/O completion drain, final fire 대기 | 새 logical work 시작, 새 app-level send loop 시작, 임의 re-arm |
+| Drained (`disconnect=true`, `outstanding==0`) | `TryFireOnDisconnected()` 1회 | 멤버 재접근, 재등록, 재연결 시도 |
+
+**Rule D1**: `m_DisconnectRequested == true` 이후에는 feature 코드가 새 logical work 를 시작하면
+안 된다. Echo loop, timer callback, retry send, 추가 recv arm 모두 금지다.
+
+**Rule D2**: posting 함수가 disconnect 이후 잘못 호출되더라도, 결과는 "즉시 실패 + counter
+복구"여야 한다. 이를 성공 경로처럼 취급해 session lifetime 을 연장하면 안 된다.
+
+**Rule D3**: `TryFireOnDisconnected()` 를 호출하는 모든 경로는 그 호출을 **마지막 동작**으로
+간주해야 한다. 호출 이후 `this` 접근 가능성을 전제한 코드는 금지한다.
+
+#### D. Practical Mapping In This Repository
+
+- Inbound: acceptor 가 세션을 만들고 `OnAccepted()` 에서 container handoff 후 정상 운용에
+  진입한다.
+- Outbound: connector / caller 가 connect 완료 전까지 임시 owner 이고, `OnConnected()` 에서
+  container handoff 후에만 일반 트래픽을 시작한다.
+- 공통: `RequestDisconnect()` 는 이유와 무관하게 동일한 drain 경로로 합류하고, 마지막
+  completion 또는 pending-zero fast path 에서만 `OnDisconnected()` 가 fire 된다.
 
 ### 2.3 Dependencies
 
 | Component | Depends On | Purpose |
 |---|---|---|
-| `IOSession` | `std::enable_shared_from_this<IOSession>` | shared_from_this() 로 retain 생성 |
-| `IOSession::OverlappedEx` | `std::shared_ptr<IOSession>` | Recv/Send 각각 SelfRetain 보유 |
-| `RIOSession` | `std::enable_shared_from_this<RIOSession>` | 동일 |
-| `RIOSession` Send/Recv Context | `std::shared_ptr<RIOSession>` | 동일 |
-| `IOService` / `RIOService` | (변경 없음) | 기존 completion 경로 유지 |
-| `IIOConsumer` | (변경 없음) | 인터페이스 불변 — Plan Q7=a |
+| `IOSession` | `std::atomic<int>`, `std::atomic<bool>` | Counter + flags |
+| `IoCompletionGuard` (신규, 파일 내부) | `IOSession&` | RAII decrement |
+| `IOService` | (변경 없음) | 기존 completion 경로 유지 |
+| `IIOConsumer` | (변경 없음) | 인터페이스 불변 |
+| `IOCPInboundSession::OnDisconnected` | container weak_ref 또는 callback | Remove 호출 경로 유지 |
+| `LibCommons::Logger` | (변경 없음) | 로깅 |
+| **Parent v1 관계** | 본 feature 먼저 main 병합 → M2e (Recv 재설계) | M2e 는 "OnIOCompleted 진입시 session alive" 불변식 위에 올림 |
 
 ---
 
 ## 3. Data Model
 
-### 3.1 IOSession `OverlappedEx` 확장
+### 3.1 IOSession 멤버 추가
 
 ```cpp
-// IOSession.ixx — protected nested struct (server-status 에서 이미 private → protected 로 승격)
-struct OverlappedEx
-{
-    OVERLAPPED            Overlapped{};
-    std::vector<char>     Buffers{};
-    std::vector<WSABUF>   WSABufs{};
-    size_t                RequestedBytes = 0;
-    bool                  IsZeroByte = false;
+// IOSession.ixx — 기존 protected/private 블록에 추가
+private:
+    // [NEW v0.3] Outstanding I/O counter.
+    // 의미: 현재 pending (posting 성공 후, completion 전) 인 I/O 개수.
+    //  - posting 성공 시 +1, completion 진입 시 -1 (RAII guard)
+    //  - posting 실패(non-PENDING) 시 즉시 -1 으로 복구
+    //  - counter == 0 && m_bDisconnecting == true 전이 순간이 last-completion
+    std::atomic<int> m_OutstandingIoCount { 0 };
 
-    // [NEW] Outstanding I/O self-retain.
-    // posting 직전 shared_from_this() 로 설정 → completion 진입 시 move-out.
-    // Lifecycle invariant: 값이 non-null 인 동안은 대응 WSARecv/WSASend 가 pending.
-    std::shared_ptr<IOSession> SelfRetain;
+    // [NEW v0.3] Disconnecting 진입 멱등 CAS.
+    // RequestDisconnect 의 첫 호출만 true 로 전환 + shutdown+close 실행.
+    std::atomic<bool> m_bDisconnecting { false };
 
-    void ResetOverlapped()
-    {
-        std::memset(&Overlapped, 0, sizeof(Overlapped));
-    }
-};
+    // [NEW v0.3] OnDisconnected fire 멱등 CAS.
+    // 마지막 completion 에서 TryFireOnDisconnected() 가 CAS 시도 → 첫 호출만 OnDisconnected() 진입.
+    std::atomic<bool> m_bOnDisconnectedFired { false };
+
+protected:
+    // [NEW v0.3] helper — counter 가 1→0 전이 && disc==true 일 때 호출.
+    // 내부에서 m_bOnDisconnectedFired CAS → 통과 시 OnDisconnected() 호출.
+    void TryFireOnDisconnected();
 ```
 
-### 3.2 RIOSession Send/Recv Context 확장
+### 3.2 `IoCompletionGuard` RAII (익명 namespace, `IOSession.cpp`)
 
 ```cpp
-// RIOSession.ixx — 기존 context 구조체에 shared_ptr 추가
-struct RioRequestContext
-{
-    // ... 기존 fields (RIO_BUFFERID, offset, length 등) ...
-
-    // [NEW] RIO 쪽도 동일 패턴. IOCP 의 SelfRetain 과 대칭.
-    std::shared_ptr<RIOSession> SelfRetain;
-};
+// IOSession.cpp — 익명 namespace
+namespace {
+    // OnIOCompleted 의 어떤 exit 에서도 m_OutstandingIoCount 를 감소시키고
+    // last-completion 이면 TryFireOnDisconnected 를 호출하는 RAII helper.
+    struct IoCompletionGuard {
+        IOSession& self;
+        explicit IoCompletionGuard(IOSession& s) noexcept : self(s) {}
+        ~IoCompletionGuard() noexcept {
+            const int prev = self.m_OutstandingIoCount.fetch_sub(1, std::memory_order_acq_rel);
+            if (prev == 1 && self.m_bDisconnecting.load(std::memory_order_acquire)) {
+                self.TryFireOnDisconnected();
+            }
+        }
+        IoCompletionGuard(const IoCompletionGuard&) = delete;
+        IoCompletionGuard& operator=(const IoCompletionGuard&) = delete;
+    };
+}
 ```
 
-**주의**: RIO 의 `requestContext` (ULONG_PTR) 에는 **raw `this` pointer 를 그대로 유지** (Plan Q8=a). SelfRetain 은 session 멤버로만 존재하여 RIO completion key 규약에 영향을 주지 않는다.
+> `IoCompletionGuard` 가 `IOSession` 의 private member 에 접근해야 하므로, `IOSession` 에 `friend struct IoCompletionGuard;` 를 선언하거나 helper 를 `IOSession` 의 nested protected struct 로 배치. 본 Design 은 **nested protected struct** 를 권장 — anonymous namespace 사용 시 friend 선언 필요 → 캡슐화 경계 혼란. `IOSession::IoCompletionGuard` 로 한다.
 
 ### 3.3 Invariants
 
-| Invariant | 보장 방법 |
-|---|---|
-| I1: `SelfRetain` 은 한 번에 **대응 I/O 1개** 에만 연결 | `m_RecvInProgress` / `m_SendInProgress` CAS 로 이미 동시 posting 방지 |
-| I2: posting 이후 반드시 완료 통지 1개 도착 | Windows IOCP/RIO 의 완료 통지 보장 (Shutdown+Close 시 실패 통지) |
-| I3: completion 진입 즉시 `move(SelfRetain)` | OnIOCompleted Recv/Send 분기의 첫 줄 (pointer 매칭 이후) |
-| I4: posting 실패 시 inline reset | 3개 site: IOCP Recv, IOCP Send, RIO posting 경로 |
-| I5: 세션 소멸은 모든 SelfRetain reset 이후에만 | shared_ptr ref-count 로 자동 보장 |
+| ID | Invariant | 보장 방법 |
+|---|---|---|
+| I1 | `m_OutstandingIoCount >= 0` 항상 | posting 성공 시 +1, completion 시 -1 (RAII 1:1 대응) + posting 실패 시 +1 후 즉시 -1 복구 |
+| I2 | 모든 pending I/O 에 대해 Windows 가 completion 배송 보장 | IOCP semantics (`WSA_IO_PENDING` 또는 `SOCKET_ERROR != WSA_IO_PENDING`). `closesocket()` 후에도 fail completion 배송 보장 |
+| I3 | OnIOCompleted 진입 시 counter 는 항상 >= 1 | posting 성공했으므로 fetch_add 완료 상태 |
+| I4 | `RequestDisconnect` 는 정확히 1회만 shutdown+close 실행 | disconnectRequested CAS 첫 통과 시에만 |
+| I5 | `OnDisconnected()` 는 정확히 1회만 호출 | `m_bOnDisconnectedFired.compare_exchange_strong(false, true)` 통과 시에만 |
+| I6 | Last-completion 조건: `fetch_sub(1)` prev == 1 && disconnectRequested == true | RAII guard 에서 체크 |
+| I7 | `~IOSession` 진입 시 `m_OutstandingIoCount == 0` | container 가 유일한 owner, Remove 는 last-completion 이후에만 |
+| I8 | OnDisconnected 호출은 항상 counter == 0 인 상태에서 발생 | I6 로 조건 성립 확인 후에만 fire |
+| I9 | Outbound app traffic 는 connect readiness 이후에만 시작 | `OnConnected()` 이전에는 payload send 금지 |
+| I10 | disconnectRequested == true 이후에는 새 logical work 시작 금지 | feature/timer/retry 계층 contract 로 보장 |
 
 ---
 
 ## 4. API Specification
 
-> **Note**: 이 feature 는 외부 API / 네트워크 프로토콜 변경 없음. "API" 는 internal C++ 함수 계약.
+> REST 없음. Internal C++ API contracts.
 
-### 4.1 Posting Pattern (통합 규약)
+### 4.1 Endpoint List (공개/내부 API 요약)
+
+| # | API | 구분 | 역할 |
+|---|---|---|---|
+| 1 | `IOSession::RequestRecv(bool bZeroByte)` | protected | Recv posting (counter +1) |
+| 2 | `IOSession::TryPostSendFromQueue()` | protected | Send posting (counter +1) |
+| 3 | `IOSession::OnIOCompleted(bool, DWORD, OVERLAPPED*)` | override (`IIOConsumer`) | IOCP worker dispatch (RAII counter -1) |
+| 4 | `IOSession::RequestDisconnect()` | public | **비동기 멱등** disconnect. shutdown+close 후 즉시 return |
+| 5 | `IOSession::OnDisconnected()` | virtual, derived override | container.Remove 수행 (호출은 last-completion 에서만 1회) |
+| 6 | `IOSession::TryFireOnDisconnected()` | protected | CAS 기반 OnDisconnected 1회 fire |
+| 7 | `~IOSession()` | destructor | counter==0 assert + 로그 |
+
+### 4.2 Posting Pattern
 
 ```cpp
-// IOCP RequestRecv — 모든 경로 (zero-byte, real)
+// IOCP RequestRecv — zero-byte / real 공통
 bool IOSession::RequestRecv(bool bZeroByte)
 {
     m_RecvOverlapped.ResetOverlapped();
@@ -213,8 +325,8 @@ bool IOSession::RequestRecv(bool bZeroByte)
 
     // ... WSABufs 구성 (기존 로직) ...
 
-    // [NEW] posting 직전 retain. 실패 시 reset.
-    m_RecvOverlapped.SelfRetain = shared_from_this();
+    // [NEW v0.3] posting 직전 counter +1
+    m_OutstandingIoCount.fetch_add(1, std::memory_order_acq_rel);
 
     DWORD flags = 0, bytes = 0;
     int result = ::WSARecv(m_pSocket->GetSocket(),
@@ -229,16 +341,26 @@ bool IOSession::RequestRecv(bool bZeroByte)
         int err = ::WSAGetLastError();
         if (err != WSA_IO_PENDING)
         {
-            // [NEW] 완료 통지 안 올 것 → inline reset
-            m_RecvOverlapped.SelfRetain.reset();
+            // [NEW v0.3] completion 안 올 것 → inline undo + last-check
+            UndoOutstandingOnFailure("RequestRecv");
             LibCommons::Logger::GetInstance().LogError("IOSession",
-                "RequestRecv() WSARecv failed. Session Id : {}, Error Code : {}, ZeroByte : {}",
-                GetSessionId(), err, bZeroByte);
+                std::format("RequestRecv() WSARecv failed. Session Id : {}, Error Code : {}, ZeroByte : {}",
+                    GetSessionId(), err, bZeroByte));
             return false;
         }
     }
-
     return true;
+}
+
+// [NEW v0.3] helper — posting 실패 시 counter 복구 + last-check
+void IOSession::UndoOutstandingOnFailure(const char* site)
+{
+    const int prev = m_OutstandingIoCount.fetch_sub(1, std::memory_order_acq_rel);
+    if (prev == 1 && m_bDisconnecting.load(std::memory_order_acquire))
+    {
+        TryFireOnDisconnected();
+    }
+    (void)site; // Debug log 에 활용 가능
 }
 ```
 
@@ -253,8 +375,8 @@ bool IOSession::TryPostSendFromQueue()
 
     if (bytesToSend == 0) { m_SendInProgress.store(false); return true; }
 
-    // [NEW] posting 직전 retain
-    m_SendOverlapped.SelfRetain = shared_from_this();
+    // [NEW v0.3] posting 직전 counter +1
+    m_OutstandingIoCount.fetch_add(1, std::memory_order_acq_rel);
 
     int result = ::WSASend(..., &m_SendOverlapped.Overlapped, nullptr);
     if (result == SOCKET_ERROR)
@@ -262,8 +384,8 @@ bool IOSession::TryPostSendFromQueue()
         int err = ::WSAGetLastError();
         if (err != WSA_IO_PENDING)
         {
-            // [NEW] inline reset
-            m_SendOverlapped.SelfRetain.reset();
+            // [NEW v0.3] inline undo + last-check
+            UndoOutstandingOnFailure("TryPostSendFromQueue");
             m_SendInProgress.store(false);
             return false;
         }
@@ -272,31 +394,34 @@ bool IOSession::TryPostSendFromQueue()
 }
 ```
 
-### 4.2 Completion Pattern (OnIOCompleted)
+### 4.3 Completion Pattern — RAII guard
 
 ```cpp
 void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped)
 {
     if (!pOverlapped) return;
 
+    // [NEW v0.3] 진입 즉시 RAII guard 생성.
+    //   - 함수 어느 exit 에서든 ~IoCompletionGuard 가 fetch_sub(1) 후 last-check.
+    //   - early return, throw 모두 안전.
+    IoCompletionGuard guard{ *this };
+
     if (pOverlapped == &(m_RecvOverlapped.Overlapped))
     {
-        // [NEW] 진입 즉시 ownership 이동. 함수의 어떤 exit 에서든 자동 drop.
-        auto self = std::move(m_RecvOverlapped.SelfRetain);
-        (void)self;   // 실제 사용은 destructor 에서 암묵적
-
-        // ----- 이하 기존 Recv 로직 100% 그대로 -----
+        // ----- 기존 Recv 로직 100% 그대로 -----
         if (!bSuccess) {
             m_RecvInProgress.store(false);
             LibCommons::Logger::GetInstance().LogInfo("IOSession",
-                "OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}",
-                GetSessionId(), GetLastError());
-            RequestDisconnect();
+                std::format("OnIOCompleted() Recv failed. Session Id : {}, Error Code : {}",
+                    GetSessionId(), ::GetLastError()));
+            RequestDisconnect();  // 멱등 — 이미 disconnecting 이면 no-op
             return;
         }
 
         if (m_RecvOverlapped.IsZeroByte) {
             if (bytesTransferred == 0) {
+                // Zero-byte completion 후 real Recv 재posting
+                // (guard 의 fetch_sub 는 여기에서도 동작 — 새 posting 이 fetch_add 로 별도 +1)
                 if (!RequestRecv(false)) {
                     m_RecvInProgress.store(false);
                     RequestDisconnect();
@@ -307,20 +432,15 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
                 return;
             }
         } else {
-            // Real Recv 경로 (server-status 에서 추가된 bytes 카운터 포함)
-            // ... CommitWrite, fetch_add, ReadReceivedBuffers, RequestReceived ...
+            // Real Recv 경로 (CommitWrite, fetch_add bytes, ReadReceivedBuffers, RequestReceived)
+            // ... 기존 로직 ...
             return;
         }
-        // [어떤 return 이 실행되든 self 는 여기서 drop]
     }
 
     if (pOverlapped == &(m_SendOverlapped.Overlapped))
     {
-        // [NEW] Send 도 동일
-        auto self = std::move(m_SendOverlapped.SelfRetain);
-        (void)self;
-
-        // ----- 이하 기존 Send 로직 그대로 -----
+        // ----- 기존 Send 로직 그대로 -----
         m_SendInProgress.store(false);
         if (!bSuccess) { RequestDisconnect(); return; }
         // ... Consume, fetch_add, OnSent, hasPending 재posting ...
@@ -329,130 +449,134 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
 }
 ```
 
-### 4.3 RIO 대칭 패턴
+**Zero-byte → Real Recv 경로의 counter 흐름**:
+```
+fn entry: counter=N (was zero-byte posted, so N>=1)
+  IoCompletionGuard created (scope-exit will fetch_sub)
+  if bytesTransferred==0 → RequestRecv(false) posted
+    → fetch_add(1): counter=N+1
+    → WSARecv posted OK
+  return
+scope exit: ~IoCompletionGuard → fetch_sub(1): counter=N
+```
+각 I/O 독립적으로 +1/-1 → net 0 이지만 "이 completion 은 처리 끝, 저 posting 은 새로 시작" 이 정확히 표현됨.
+
+### 4.4 RequestDisconnect (비동기 멱등)
 
 ```cpp
-// RIOSession posting — IOCP 와 동일 구조
-void RIOSession::RequestRecv()
+void IOSession::RequestDisconnect()
 {
-    m_RecvContext.SelfRetain = shared_from_this();
-    bool ok = RioExtension::GetInstance().RIOReceive(
-        m_RequestQueue, &m_RecvBuffer, 1, 0,
-        reinterpret_cast<PVOID>(&m_RecvContext));
-    if (!ok) {
-        m_RecvContext.SelfRetain.reset();
-        // ... error log, RequestDisconnect ...
+    bool expected = false;
+    if (!m_bDisconnecting.compare_exchange_strong(
+            expected, true,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire))
+    {
+        // 이미 disconnecting — no-op
+        LibCommons::Logger::GetInstance().LogDebug("IOSession",
+            std::format("RequestDisconnect() idempotent skip. Session Id : {}", GetSessionId()));
+        return;
     }
-}
 
-void RIOSession::OnRioIOCompleted(RIO_RESULT const& result)
-{
-    auto* pCtx = reinterpret_cast<RioRequestContext*>(result.RequestContext);
-    auto self = std::move(pCtx->SelfRetain);
-    (void)self;
+    // First pass only reach here.
+    LibCommons::Logger::GetInstance().LogInfo("IOSession",
+        std::format("RequestDisconnect() initiated. Session Id : {}, OutstandingIo : {}",
+            GetSessionId(),
+            m_OutstandingIoCount.load(std::memory_order_acquire)));
 
-    // ... 기존 Send/Recv 분기 로직 그대로 ...
+    // shutdown+close: Windows 가 모든 pending I/O 에 fail completion 배송 보장
+    if (m_pSocket)
+    {
+        ::shutdown(m_pSocket->GetSocket(), SD_BOTH);
+        m_pSocket->Close();   // 기존 Socket wrapper 의 closesocket 래퍼
+    }
+
+    // 주의: 여기서 대기하지 않음. 호출자 즉시 return.
+    // Pending I/O 가 남아있다면 각 fail completion 이 OnIOCompleted 를 타고 들어와
+    // IoCompletionGuard 가 counter 를 1→0 으로 내릴 때 TryFireOnDisconnected 가 호출됨.
+    // Pending I/O 가 이미 0이면 이 함수 진입 시점에 이미 counter==0 이므로 아래 즉시 fire.
+    if (m_OutstandingIoCount.load(std::memory_order_acquire) == 0)
+    {
+        TryFireOnDisconnected();
+    }
 }
 ```
 
-### 4.4 세션 소멸 시 로그 (FR-11)
+> **주의**: `RequestDisconnect` 진입 시점에 pending I/O 가 없는 경우(아주 드묾 — accept 직후 disconnect 요청 같은) 도 존재. 이 때는 마지막 completion 이 없으므로 여기서 직접 `TryFireOnDisconnected()` 를 한 번 더 시도한다. CAS 덕분에 중복 호출 안전.
+
+### 4.5 TryFireOnDisconnected (last-completion 경로)
+
+```cpp
+void IOSession::TryFireOnDisconnected()
+{
+    // 전제: counter 가 0 에 도달, disconnecting == true.
+    // CAS 로 fired 플래그를 한 번만 통과시킴.
+    bool expected = false;
+    if (!m_bOnDisconnectedFired.compare_exchange_strong(
+            expected, true,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire))
+    {
+        // 이미 fire 된 상태 — 누군가 먼저 호출. no-op.
+        return;
+    }
+
+    LibCommons::Logger::GetInstance().LogInfo("IOSession",
+        std::format("TryFireOnDisconnected() firing. Session Id : {}", GetSessionId()));
+
+    // virtual dispatch → IOCPInboundSession::OnDisconnected → container.Remove(id)
+    OnDisconnected();
+    // OnDisconnected 반환 시점엔 이미 container 에서 제거됐을 가능성 있음.
+    // 즉 외부 shared_ptr 이 drop 되어 *this 가 소멸 중일 수 있다.
+    // 이 함수 반환 후 아무 멤버도 터치하지 말 것. (안전을 위해 return 직후 종료)
+}
+```
+
+> **위험 포인트**: `OnDisconnected()` 가 container.Remove 를 호출하면, container 의 shared_ptr 이 drop 되면서 이 IOSession 의 destructor 가 즉시 실행될 수 있다. `TryFireOnDisconnected()` 호출 후 `OnIOCompleted` 나 `UndoOutstandingOnFailure` 등 호출부가 멤버를 추가 접근하면 UAF. 따라서 **호출부에서 `TryFireOnDisconnected()` 호출은 반드시 함수의 "마지막 동작" 으로 배치**. RAII guard 의 경우 destructor 마지막 줄이므로 안전. `UndoOutstandingOnFailure` 도 `return` 직전에만 호출.
+
+### 4.6 Destructor Paranoid Check
 
 ```cpp
 IOSession::~IOSession()
 {
-    // leak 조기 탐지: destructor 진입 시점에 SelfRetain 이 non-null 이면 invariant 위반.
-    if (m_RecvOverlapped.SelfRetain || m_SendOverlapped.SelfRetain)
+    const int finalCount = m_OutstandingIoCount.load(std::memory_order_acquire);
+    const bool wasDisc   = m_bDisconnecting.load(std::memory_order_acquire);
+    const bool wasFired  = m_bOnDisconnectedFired.load(std::memory_order_acquire);
+
+    if (finalCount != 0)
     {
+        // 논리상 절대 발생 안 해야 함 — invariant 위반 시 즉시 발견.
         LibCommons::Logger::GetInstance().LogError("IOSession",
-            "~IOSession() SelfRetain still set! Session Id : {}, Recv : {}, Send : {}",
-            GetSessionId(),
-            static_cast<bool>(m_RecvOverlapped.SelfRetain),
-            static_cast<bool>(m_SendOverlapped.SelfRetain));
+            std::format("~IOSession() INVARIANT VIOLATION — outstanding IO at destruction. "
+                        "Session Id : {}, count : {}, disc : {}, fired : {}",
+                        GetSessionId(), finalCount, wasDisc, wasFired));
     }
     else
     {
         LibCommons::Logger::GetInstance().LogDebug("IOSession",
-            "~IOSession() Session Id : {}", GetSessionId());
+            std::format("~IOSession() Session Id : {}, disc : {}, fired : {}",
+                        GetSessionId(), wasDisc, wasFired));
     }
 }
 ```
-
-실제로 `SelfRetain` 이 non-null 이면 우리 자신이 destructor 안에 있을 수 없음 (순환 참조). 위 분기는 **논리적으로 절대 trigger 되지 않아야 하는** paranoid check — 로직 자체의 invariant 증명.
 
 ---
 
 ## 5. UI/UX Design
 
-### 5.1 FastPortTestClient Stress Mode 확장
+### 5.1 Stress Mode UI (v0.2 에서 이미 구현 완료)
 
-현재 Scale 테스트는 단순 대량 연결만 수행. Stress reproducer 는 **연결 + 반복 disconnect/reconnect** 를 5분간 실행.
+`FastPortTestClient` Stress 탭 — Scenario A/B/C 라디오, RIO 라디오 disabled. 본 v0.3 에서 **변경 없음**.
 
-```
-┌─────────────────────────────────────────────────────┐
-│ FastPortTestClient                                  │
-│ ┌─────────────────────────────────────────────────┐ │
-│ │ [Connection] [Echo] [Benchmark] [Metrics]       │ │
-│ │ [A/B] [Admin] [Stress] ◀ NEW                    │ │
-│ └─────────────────────────────────────────────────┘ │
-│                                                     │
-│  Stress Mode                                        │
-│  ─────────────────────────────────────────────────  │
-│  Target IP/Port:   [127.0.0.1]:[7777]               │
-│  Target Conns:     [10000]                          │
-│  Churn rate:       [100] /sec (disconnect+reconnect)│
-│  Duration:         [300] sec                        │
-│  Server mode:      ● IOCP  ○ RIO                    │
-│                                                     │
-│  [Start Stress]  [Stop]                             │
-│                                                     │
-│  Stats (live):                                      │
-│    Total Accepted : 30123                           │
-│    Active         : 9987                            │
-│    Churned        : 20136                           │
-│    Elapsed        : 201 / 300 sec                   │
-│    Crash detected : None   ← 빨간색으로 변함        │
-│                                                     │
-│  Log tail (last 5):                                 │
-│    [INFO] session destructed id=123 ok              │
-│    ...                                              │
-└─────────────────────────────────────────────────────┘
-```
+### 5.2 Live stats 표시 (기존 유지)
 
-### 5.2 Stress Mode User Flow
-
-```
-사용자
-  ↓
-FastPortServer(.exe) 별도 프로세스 실행 (IOCP 또는 RIO)
-  ↓
-TestClient Stress 탭 → 파라미터 설정 → [Start Stress]
-  ↓
-TestClient 내부:
-  1. Target Conns 개수만큼 IOService 에 연결 posting
-  2. 타이머 기반 churn loop: 매 10ms 마다 churn_rate/100 개 disconnect + reconnect
-  3. 실시간 stats 표시
-  ↓
-5분 경과 또는 [Stop] → 모든 연결 종료 + 최종 stats 출력
-  ↓
-사용자: FastPortServer 로그 검사 (destruct = accept 일치, 크래시 없음)
-```
+- Scenario A: Connect Attempts / Failures / Total Accepted / Active / Churned / Elapsed / Crash detected
+- Scenario B: Current Round / Packets Received / Elapsed
+- Scenario C: Packets Received / Elapsed
 
 ### 5.3 Page UI Checklist
 
-#### Stress Tab
-
-- [ ] Input: Target Conns (numeric, 1~50000, default 10000)
-- [ ] Input: Churn rate /sec (numeric, 0~1000, default 100)
-- [ ] Input: Duration seconds (numeric, 10~3600, default 300)
-- [ ] Radio: Server mode (IOCP / RIO) — **UI only**, 서버는 별도 프로세스
-- [ ] Button: Start Stress (disabled while running)
-- [ ] Button: Stop (enabled while running)
-- [ ] Stat: Total Accepted (cumulative connect 성공 카운터)
-- [ ] Stat: Active (현재 살아있는 연결 수)
-- [ ] Stat: Churned (disconnect + reconnect 성공 사이클 수)
-- [ ] Stat: Elapsed / Target duration
-- [ ] Stat: Crash detected (boolean, 연결 실패 스파이크 감지 시 활성)
-- [ ] Log tail: 최근 5개 TestClient 측 로그 출력
+v0.2 와 동일 (변경 없음). reproducer 완료 보고 참조.
 
 ---
 
@@ -462,37 +586,35 @@ TestClient 내부:
 
 | # | Scenario | 발생 경로 | 처리 방식 |
 |---|---|---|---|
-| E1 | WSARecv immediate failure (e.g. WSAENOTSOCK) | `RequestRecv` posting | inline `SelfRetain.reset()` + log + return false |
-| E2 | WSASend immediate failure | `TryPostSendFromQueue` | inline reset + `m_SendInProgress = false` + return false |
-| E3 | `shared_from_this()` 호출 시점에 외부 shared_ptr 이 없음 | Accept 직후 container 등록 전 posting 발생 시 | 발생 불가 — `OnAccepted` (`InboundSession::OnAccepted`) 에서 container 등록 후 `RequestReceived` 호출. 만약 재구성 시 이 invariant 가 깨지면 `std::bad_weak_ptr` throw → 명확한 crash 로 로직 오류 조기 발견 |
-| E4 | Socket close 후 pending 완료 도착 | 정상 흐름 | `OnIOCompleted(bSuccess=false)` → `SelfRetain` move-out → drop → 안전 소멸 |
-| E5 | Destructor 에 SelfRetain 남아있음 | 순환 참조 or invariant 버그 | `~IOSession()` 에서 `LogError` — 논리상 발생 불가 |
-| E6 | 두 번 reset (posting 실패 + completion 도착) | posting 실패 시 완료 안 옴 | move 는 이미 null 인 shared_ptr 에 대해 no-op — 안전 |
-| E7 | Destruct 안 되는 세션 (container remove 했는데도 alive) | outstanding completion 대기 중 | 정상. 완료 도착 시 move-out → destruct. 정지되면 heap leak 로 관찰 |
+| E1 | WSARecv immediate failure (e.g. WSAENOTSOCK) | `RequestRecv` posting | `UndoOutstandingOnFailure` → LogError → return false → caller 가 RequestDisconnect |
+| E2 | WSASend immediate failure | `TryPostSendFromQueue` | 동일 — counter undo + return false |
+| E3 | OnIOCompleted 내부 예외 throw | 사용자 콜백 또는 내부 로직 오류 | `IoCompletionGuard` destructor 는 noexcept fetch_sub 수행 → counter 정상화. 예외는 IOService worker 가 caller 로 전파 (기존 정책 유지) |
+| E4 | RequestDisconnect 중복 호출 | admin + idle + error 동시 | CAS 첫 통과만 shutdown+close, 이후는 DEBUG 로그로 skip |
+| E5 | Disconnecting 도중 새 posting 시도 | 외부 코드 오용 | fetch_add(1) 은 수행되지만 WSARecv 가 closed socket 에 fail → UndoOutstandingOnFailure 로 복구. Counter drift 없음 |
+| E6 | Pending I/O 없는데 RequestDisconnect | 드문 케이스 (accept 직후) | RequestDisconnect 내부에서 counter==0 검사 후 즉시 `TryFireOnDisconnected` 호출 |
+| E7 | OnDisconnected 중복 호출 시도 | worker 경합 | `m_bOnDisconnectedFired` CAS 로 정확히 1회만 |
+| E8 | `~IOSession` 시 counter != 0 | 논리 버그 | ERROR 로그로 즉시 발견 |
 
 ### 6.2 Logging Contract
 
 | Category | Level | When |
 |---|---|---|
-| `"IOSession"` | INFO | 정상 disconnect, session destruct (ok) |
-| `"IOSession"` | ERROR | WSARecv/WSASend immediate failure, `~IOSession` 에 SelfRetain 남아있음 (invariant 위반) |
-| `"RIOSession"` | INFO/ERROR | 동일 |
-| `"Stress"` (신규) | INFO | 매 10초 요약 (active, churned, elapsed) |
-| `"Stress"` | ERROR | 연결 실패 스파이크 감지 — crash 의심 |
+| `"IOSession"` | INFO | RequestDisconnect 첫 통과, TryFireOnDisconnected firing, session 정상 destruct |
+| `"IOSession"` | DEBUG | RequestDisconnect 중복 호출 skip, destruct 상세 |
+| `"IOSession"` | ERROR | WSARecv/WSASend immediate failure, `~IOSession` invariant 위반 |
+| `"Stress"` | INFO/ERROR | (reproducer 측 기존) |
 
 ---
 
 ## 7. Security Considerations
 
-본 피처는 **내부 lifetime 관리**만 수정하며 외부 공격면 변경 없음. 기존 보안 특성 유지.
-
-- [x] 입력 검증: 변경 없음 (패킷 파싱 경로 수정 없음)
+- [x] 입력 검증: 변경 없음
 - [x] 인증/인가: 변경 없음
 - [x] 민감 정보 암호화: 변경 없음
 - [x] 네트워크: 변경 없음
 - [x] Rate limiting: 변경 없음
 
-추가 고려: **Stress reproducer 가 외부 공격 벡터가 되지 않도록** — FastPortTestClient 내에서만 실행되며, Target IP 는 사용자 입력 (기본 127.0.0.1). 악의적 외부 서버로 DoS 도구로 쓰이지 않도록 UI 에 "Local loopback only" 경고 표시.
+본 feature 는 내부 lifetime 관리만 변경. 외부 공격면 변화 없음.
 
 ---
 
@@ -502,58 +624,55 @@ TestClient 내부:
 
 | Type | Target | Tool | Phase |
 |------|--------|------|-------|
-| L1 Unit | IOSession SelfRetain lifecycle (posting / completion / failure) | LibNetworksTests | Do |
-| L1 Unit | RIOSession SelfRetain lifecycle | LibNetworksTests | Do |
-| L1 Unit | Destructor paranoid check 동작 | LibNetworksTests | Do |
-| L3 Stress | 10k conn × 5min reconnect, UAF 0회 + leak 0 | FastPortTestClient Stress 탭 | Do |
-| Regression | LibNetworksTests 64 개 기존 테스트 | vstest.console | Check |
+| L1 Unit | IOSession counter/disc/fired life-cycle | `LibNetworksTests` | Do |
+| L1 Unit | RequestDisconnect 멱등성 | `LibNetworksTests` | Do |
+| L1 Unit | OnDisconnected 1회 fire CAS | `LibNetworksTests` | Do |
+| L1 Unit | Destructor paranoid check | `LibNetworksTests` | Do |
+| L3 Stress | Scenario A/B/C UAF 0 + leak 0 | `FastPortTestClient` Stress | Do (verify-after) |
+| Regression | 기존 64 tests | vstest.console | Check |
+| Perf Baseline | 3k idle + 64B P99 전/후 비교 | `FastPortBenchmark` | Do (verify-after) |
 
-### 8.2 L1 — IOSession Lifetime Tests (`IOSessionLifetimeTests.cpp`)
-
-| # | Test | Assertion |
-|---|------|-----------|
-| LT-01 | `SelfRetain_InitiallyNull` | 생성 직후 `m_RecvOverlapped.SelfRetain == nullptr` (inspector 활용) |
-| LT-02 | `PostingSuccess_RetainHeld` | `RequestRecv(true)` 호출 → external shared_ptr count 증가 확인 (`use_count() >= 2`) |
-| LT-03 | `CompletionMovesOut_ThenDrops` | 시뮬된 OnIOCompleted 후 SelfRetain == nullptr, use_count 복귀 |
-| LT-04 | `PostingFailure_ResetsInline` | 소켓 INVALID_SOCKET 상태에서 `RequestRecv` → false 반환, SelfRetain 즉시 null |
-| LT-05 | `DestructReleasesWhenNoRefs` | container 에 안 넣고 external ref 해제 → destructor 호출 확인 (weak_ptr.expired()) |
-| LT-06 | `SendRetainSymmetry` | `TryPostSendFromQueue` 도 동일 패턴으로 동작 |
-
-### 8.3 L1 — RIOSession Lifetime Tests (`RIOSessionLifetimeTests.cpp`)
+### 8.2 L1 — Lifetime Tests (`IOSessionLifetimeTests.cpp`)
 
 | # | Test | Assertion |
 |---|------|-----------|
-| RT-01 | `RIO_PostingSuccess_RetainHeld` | RIO Receive posting 후 use_count 증가 |
-| RT-02 | `RIO_CompletionMovesOut` | 시뮬된 completion 후 SelfRetain null |
-| RT-03 | `RIO_PostingFailure_ResetsInline` | 잘못된 RQ 상태에서 RIOReceive 실패 → reset |
-| RT-04 | `RIO_SendRetainSymmetry` | Send 도 동일 |
+| LT-01 | `PostingSuccess_CounterIncremented` | `RequestRecv(true)` 호출 후 `m_OutstandingIoCount` == 1 (테스트용 inspector) |
+| LT-02 | `CompletionDecrements` | 시뮬 OnIOCompleted 후 counter == 0 |
+| LT-03 | `PostingFailure_CounterUndone` | 소켓 INVALID 상태에서 `RequestRecv` → false 반환, counter 여전히 0 |
+| LT-04 | `RequestDisconnect_Idempotent` | 10 회 호출 → `shutdown`/`closesocket` 호출 수 각각 1 (mock Socket) |
+| LT-05 | `LastCompletionFiresOnDisconnected` | Disconnect 후 pending 완료 → OnDisconnected 콜백 1회, 호출 시점에 counter==0 |
+| LT-06 | `MultipleIOs_FireAfterAllDrained` | Recv + Send 동시 posting → Disconnect → 두 completion 모두 처리 후 OnDisconnected 1회 |
+| LT-07 | `OnDisconnected_FiresExactlyOnce_ConcurrentLast` | 2 worker 가 동시에 마지막 completion 처리 시도 → CAS 에 의해 OnDisconnected 콜백 정확히 1회 |
 
-### 8.4 L1 — Destructor Paranoid Check
+### 8.3 L1 — Destructor Paranoid
 
 | # | Test | Assertion |
 |---|------|-----------|
-| DT-01 | `Destructor_NoLog_WhenClean` | 정상 flow 후 destruct → ERROR 로그 없음 |
-| DT-02 | `Destructor_LogsError_IfStaleRetain` | 인위적으로 SelfRetain 을 null 이 아닌 상태로 destructor 진입 시 → ERROR 로그 (이 테스트 자체가 순환 참조 → reset 후 destruct, log 캡처) |
+| DT-01 | `Destructor_NoErrorLog_WhenClean` | 정상 flow 후 destruct → ERROR 로그 없음 |
+| DT-02 | `Destructor_ErrorLog_WhenStaleCounter` | 인위적으로 counter 를 !=0 으로 세팅하여 destructor 진입 → ERROR 로그 캡처 (테스트 후 counter 리셋하여 실제 UAF 회피) |
 
-### 8.5 L3 — Stress Reproducer Scenario
+### 8.4 L3 — Stress (reproducer 재활용, verify-after 에서 실행)
 
-| 단계 | 작업 | 기준 |
-|---|---|---|
-| S1 | 패치 **전** FastPortServer Debug|x64 실행 + TestClient Stress 10k×5min | UAF 크래시 재현 (예상: >=1회) |
-| S2 | 패치 **전** Release|x64 로도 실행 | UAF 재현 여부 기록 (Plan Q4) |
-| S3 | 패치 **후** Debug|x64 10k×5min | UAF 0회 |
-| S4 | 패치 후 Release|x64 10k×5min | UAF 0회 |
-| S5 | Accept 로그 count 와 ~Session 로그 count 비교 | 100% 일치 (leak 0) |
-| S6 | `_CrtSetDbgFlag(_CRTDBG_LEAK_CHECK_DF)` Debug 종료 시 | 리포트 leak 0 |
-| S7 | FastPortServerRIO 로 S3~S6 반복 | RIO 도 동일 결과 |
+| 단계 | 시나리오 | 환경 | 기준 |
+|---|---|---|---|
+| S1 | Scenario A — 패치 **후** | Debug\|x64 | UAF 0회, churn 30k 완료, destruct=accept 일치 |
+| S2 | Scenario A — 패치 후 | Release\|x64 | 동일 |
+| S3 | Scenario B (1M × 2 round) — 패치 후 | Debug\|x64 | UAF 0회, 2M packet, leak 0 |
+| S4 | Scenario B — 패치 후 | Release\|x64 | 동일 |
+| S5 | Scenario C (1k × 100pps × 5min) — 패치 후 | Debug\|x64 | UAF 0회, leak 0 |
+| S6 | Scenario C — 패치 후 | Release\|x64 | 동일 |
+| S7 | `_CrtSetDbgFlag(_CRTDBG_LEAK_CHECK_DF)` 전 시나리오 종료 시 | Debug | leak 0 |
+| S8 | 3k conn idle throughput 전/후 | Release | 감소 ≤ 3% |
+| S9 | 64B echo P50/P99 전/후 | Release | P99 regression ≤ 5µs |
+| S10 | destruct 로그 순서 확인 | Debug | 항상 container.Remove 이후에 `~IOSession` |
 
-### 8.6 Regression
+### 8.5 Regression
 
 ```bash
 vstest.console.exe _Builds/x64/Debug/LibNetworksTests.dll /Platform:x64
 ```
 
-기대 결과: **64 → 74 (기존 64 + LT 6 + RT 4 or DT 2) 전부 PASS, 회귀 0**.
+기대: **64 → 73 (기존 64 + LT 7 + DT 2) 전부 PASS, 회귀 0**.
 
 ---
 
@@ -564,40 +683,40 @@ vstest.console.exe _Builds/x64/Debug/LibNetworksTests.dll /Platform:x64
 | Layer | Responsibility | Location |
 |---|---|---|
 | **Protocol** | proto 직렬화 | `Protos/`, `Protocols/` (변경 없음) |
-| **Session** | I/O lifecycle + lifetime retain | `LibNetworks/IOSession.*`, `LibNetworks/RIOSession.*` ← **수정** |
-| **Service** | Worker thread pool, completion dispatch | `LibNetworks/IOService.*`, `LibNetworks/RIOService.*` (변경 없음) |
+| **Session** | I/O lifecycle + **결정적 수명 관리 (counter + drain-before-remove)** | `LibNetworks/IOSession.*` ← **수정** |
+| **Service** | Worker thread pool, completion dispatch | `LibNetworks/IOService.*` (변경 없음) |
 | **Consumer Interface** | `IIOConsumer::OnIOCompleted` | `LibNetworks/IOConsumer.ixx` (변경 없음) |
+| **Inbound Session** | container.Remove 호출 (`OnDisconnected` override) | `FastPortServer/IOCPInboundSession.*` (변경 없음 — 기존 OnDisconnected 로직 재사용) |
 | **Test Harness** | L1 lifetime tests | `LibNetworksTests/` ← **확장** |
-| **Stress Client** | TestClient Stress 탭 | `FastPortTestClient/` ← **확장** |
+| **Stress Client** | Scenario A/B/C runner | `FastPortTestClient/` (완료, 변경 없음) |
+| **Freeze** | v1 기간 변경 금지 | `LibNetworksRIO/`, `FastPortServerRIO/`, `LibNetworksRIOTests/` |
 
 ### 9.2 Module Dependencies
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│   LibNetworks                                        │
+│   LibNetworks (IOCP 축 v1)                           │
 │   ┌────────────────────────────────────────────┐    │
-│   │  IOSession / RIOSession  ←── 수정 범위      │    │
-│   │   - OverlappedEx { ..., SelfRetain }        │    │
-│   │   - shared_from_this() based retain         │    │
+│   │  IOSession  ←── 본 feature 수정 범위         │    │
+│   │   - atomic<int> m_OutstandingIoCount        │    │
+│   │   - atomic<bool> m_bDisconnecting           │    │
+│   │   - atomic<bool> m_bOnDisconnectedFired     │    │
+│   │   - IoCompletionGuard (nested)              │    │
+│   │   - TryFireOnDisconnected()                 │    │
+│   │   - UndoOutstandingOnFailure()              │    │
 │   └────────────────────────────────────────────┘    │
 │                       ↑                              │
 │                       │ (변경 없음)                  │
 │              IIOConsumer / IOService                 │
+│                                                      │
+│   LibNetworksRIO  ──── v1 freeze, 변경 없음         │
 └──────────────────────────────────────────────────────┘
                        │
                        ↓
 ┌──────────────────────────────────────────────────────┐
-│   FastPortServer / FastPortServerRIO                 │
-│   (변경 없음 — ServiceMode / InboundSession 계약 유지)│
-└──────────────────────────────────────────────────────┘
-                       │
-                       ↓
-┌──────────────────────────────────────────────────────┐
-│   FastPortTestClient                                 │
-│   ┌────────────────────────────────────────────┐    │
-│   │  TestClientApp (Stress tab)  ←── 수정 범위  │    │
-│   │  TestRunner (Churn loop)     ←── 수정 범위  │    │
-│   └────────────────────────────────────────────┘    │
+│   FastPortServer (IOCP v1)                           │
+│   IOCPInboundSession::OnDisconnected                 │
+│     └ 기존 container.Remove(id) 로직 유지            │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -607,19 +726,23 @@ vstest.console.exe _Builds/x64/Debug/LibNetworksTests.dll /Platform:x64
 
 프로젝트 convention 은 `CLAUDE.md` 준수:
 
-- `PascalCase` 클래스/메서드, `m_` 멤버, `k` 상수, `::` Win32 전역 접두
-- `LibCommons::Logger` 사용, GMF 에 `#include <spdlog/spdlog.h>` 필수
-- 모듈 interface `.ixx` + impl `.cpp` 분리
-- `std::lock_guard` / `LibCommons::RWLock`
+- `PascalCase` / `m_` / `k` / `::` Win32
+- `LibCommons::Logger`, GMF `#include <spdlog/spdlog.h>`
+- 모듈 `.ixx` + `.cpp`
+- `std::lock_guard` / RAII 선호
 
 **이 피처 특화 규약**:
 
 | Item | Convention |
 |---|---|
-| SelfRetain 타입 | `std::shared_ptr<SessionType>` (IOSession 또는 RIOSession) |
-| Posting site 주석 | `// Lifetime: retain for outstanding I/O — released on completion` |
-| Completion site 주석 | `// Lifetime: move-out retains self until function exit` |
-| 로그 카테고리 | `"IOSession"` / `"RIOSession"` (기존) + `"Stress"` (신규, TestClient 측) |
+| Counter 타입 | `std::atomic<int>` (non-negative, `int` 로 충분 — pending 수 현실상 <1000) |
+| Flag 타입 | `std::atomic<bool>` + `compare_exchange_strong` |
+| Memory order | posting/completion 에 `memory_order_acq_rel`, pure load 에 `memory_order_acquire` |
+| RAII helper 이름 | `IOSession::IoCompletionGuard` (nested) |
+| Posting site 주석 | `// Lifetime: +1 — release on completion (RAII) or undo on failure` |
+| Completion site 주석 | `// Lifetime: IoCompletionGuard auto -1 on any exit` |
+| 로그 카테고리 | `"IOSession"` (기존 유지) |
+| 문자열 포맷 | `std::format` |
 
 ---
 
@@ -629,58 +752,59 @@ vstest.console.exe _Builds/x64/Debug/LibNetworksTests.dll /Platform:x64
 
 ```
 LibNetworks/
-├── IOSession.ixx          ← 수정: OverlappedEx::SelfRetain 추가, ~IOSession 선언
-├── IOSession.cpp          ← 수정: posting (2곳) + completion (2곳) + ~IOSession
-├── RIOSession.ixx         ← 수정: RequestContext::SelfRetain 추가, ~RIOSession 선언
-├── RIOSession.cpp         ← 수정: posting/completion + ~RIOSession
+├── IOSession.ixx          ← 수정: 3개 atomic 멤버 + TryFireOnDisconnected/UndoOutstandingOnFailure 선언
+├── IOSession.cpp          ← 수정: posting counter, OnIOCompleted RAII, RequestDisconnect CAS, TryFire, ~IOSession
 └── (나머지 변경 없음)
+
+LibNetworks/RIOSession.*   ← v1 freeze (v1.1 이관)
 
 LibNetworksTests/
-├── IOSessionLifetimeTests.cpp   ← 신규 (LT-01~06, 6 tests)
-├── RIOSessionLifetimeTests.cpp  ← 신규 (RT-01~04, 4 tests)
-├── LibNetworksTests.vcxproj     ← 수정: 신규 2 파일 등록
+├── IOSessionLifetimeTests.cpp   ← 신규 (LT-01~07 + DT-01~02, 9 tests)
+├── LibNetworksTests.vcxproj     ← 수정
 └── LibNetworksTests.vcxproj.filters
 
-FastPortTestClient/
-├── TestClientApp.ixx      ← 수정: Stress 탭 추가
-├── TestRunner.ixx         ← 수정: Churn loop (disconnect+reconnect)
-└── (나머지 변경 없음)
+FastPortTestClient/        ← 이미 완료 (reproducer scope), 변경 없음
 ```
 
 ### 11.2 Implementation Order
 
-1. **Stress reproducer 먼저** (Plan Q4: Release 재현 선행) — 패치 전 UAF 재현 확인 가능해야 함.
-2. **IOCP 패치** — Session 이 가장 많이 사용되는 경로, 증상 확인 즉각 가능.
-3. **RIO 패치** — 동일 패턴 복제.
-4. **L1 테스트** — 새 invariant 단위 검증.
-5. **Stress 재실행** — 패치 후 UAF 0회 검증.
+1. **IOSession.ixx 선언 추가** — atomic 3개, helper 2개 (TryFireOnDisconnected, UndoOutstandingOnFailure), nested `IoCompletionGuard` struct, `~IOSession` 선언
+2. **IOSession.cpp 구현**:
+   a. `IoCompletionGuard` 정의 (nested struct)
+   b. `UndoOutstandingOnFailure` 정의
+   c. `RequestRecv`: fetch_add + 실패 시 UndoOutstandingOnFailure
+   d. `TryPostSendFromQueue`: 동일
+   e. `OnIOCompleted`: 진입 즉시 `IoCompletionGuard guard{*this}` 생성, 나머지 기존 로직
+   f. `RequestDisconnect`: CAS + shutdown+close + (pending 없으면 TryFire)
+   g. `TryFireOnDisconnected`: CAS + OnDisconnected() 호출 (마지막 동작)
+   h. `~IOSession`: counter==0 assert + 로그
+3. **Build 검증** — Debug+Release warning-as-error green
+4. **L1 테스트** — IOSessionLifetimeTests.cpp (LT-01~07 + DT-01~02)
+5. **`verify-after` 진입** — Scenario A/B/C + Perf
 
 ### 11.3 Session Guide
 
-> `--scope` 파라미터로 session 분할 지원.
-
-#### Module Map
+#### Module Map (v0.3 갱신)
 
 | Module | Scope Key | Description | Estimated Turns |
 |---|---|---|:-:|
-| Stress reproducer | `reproducer` | TestClient Stress 탭 + Churn loop + 실측 UI | 20-25 |
-| IOCP 패치 | `iocp` | `IOSession.ixx/cpp` OverlappedEx::SelfRetain + posting/completion | 15-20 |
-| RIO 패치 | `rio` | `RIOSession.ixx/cpp` 동일 패턴 복제 | 15-20 |
-| L1 테스트 | `tests` | IOSessionLifetimeTests + RIOSessionLifetimeTests (10 tests) | 15-20 |
-| Stress 재현/검증 | `verify` | 패치 전/후 10k×5min 실행 + 로그 수집 + 결과 기록 | 10-15 |
+| Stress reproducer (완료) | `reproducer` | Scenario A/B/C runner | (완료) |
+| 패치 전 재현 증거 (완료) | `verify-before` | Debug 재현, evidence 문서 | (완료) |
+| IOCP 패치 | `iocp-patch` | IOSession counter/disc/fired + RAII guard + CAS 멱등 + ~IOSession | 20-25 |
+| L1 테스트 | `tests` | IOSessionLifetimeTests.cpp (LT 7 + DT 2 = 9 tests) | 15-20 |
+| Stress + Perf 검증 | `verify-after` | A/B/C × Debug/Release + 3k idle + 64B P99 | 15-20 |
 
-#### Recommended Session Plan
+#### Recommended Session Plan (갱신)
 
 | Session | Phase | Scope | Turns |
 |---|---|---|:-:|
-| Session 1 | Plan + Design | 전체 | 35-40 (완료) |
-| Session 2 | Do | `--scope reproducer` | 20-25 |
-| Session 3 | Do | `--scope verify` (패치 전 재현) | 10-15 |
-| Session 4 | Do | `--scope iocp` | 15-20 |
-| Session 5 | Do | `--scope rio` | 15-20 |
-| Session 6 | Do | `--scope tests` | 15-20 |
-| Session 7 | Do | `--scope verify` (패치 후 검증) | 10-15 |
-| Session 8 | Check + Report | 전체 | 30-40 |
+| S1 (done) | Plan v0.3 + Design v0.3 | 전체 | 25-30 |
+| S2 (done) | Do `--scope reproducer` | | 25 |
+| S3 (done) | Do `--scope verify-before` | | 8 |
+| S4 | Do `--scope iocp-patch` | | 20-25 |
+| S5 | Do `--scope tests` | | 15-20 |
+| S6 | Do `--scope verify-after` | | 15-20 |
+| S7 | Check + Report | 전체 | 30-40 |
 
 ---
 
@@ -688,4 +812,7 @@ FastPortTestClient/
 
 | Version | Date | Changes | Author |
 |---|---|---|---|
-| 0.1 | 2026-04-21 | Initial draft (Option C Pragmatic 선택, Module Map 5개) | AnYounggun |
+| 0.1 | 2026-04-21 | Initial draft (Option C Pragmatic 선택, Module Map 5개, IOCP+RIO 동시, SelfRetain) | AnYounggun |
+| 0.2 | 2026-04-22 | Plan v0.2 정렬 (RIO 분리, Stress 3 시나리오, parent feature 참조, move-out vs RetainGuard 등가) — **SelfRetain 기반 유지** | An Younggun |
+| **0.3** | **2026-04-22** | **Plan v0.3 정렬 — SelfRetain 패턴 기각. Outstanding I/O Counter + Drain-before-Remove 채택. 단일 owner(container) 원칙. 3개 atomic 멤버(`m_OutstandingIoCount`, `m_bDisconnecting`, `m_bOnDisconnectedFired`). RAII `IoCompletionGuard` (nested). `RequestDisconnect` 비동기 멱등 CAS. `TryFireOnDisconnected` CAS 1회 fire. Zero-byte / Real Recv counter 독립. State machine 다이어그램 §2.2 신설. `UndoOutstandingOnFailure` helper. Destructor paranoid assert. L1 tests LT-01~07 + DT-01~02 (9 tests).** | **An Younggun** |
+| **0.3.1** | **2026-04-22** | **Lifecycle contract 명문화. owner handoff(acceptor/connector -> container), readiness와 lifetime 분리, `RequestDisconnect` 이후 새 logical work 금지 규칙, inbound/outbound 실운영 매핑 추가.** | **An Younggun** |

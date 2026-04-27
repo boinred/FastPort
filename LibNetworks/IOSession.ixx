@@ -41,8 +41,8 @@ public:
         std::unique_ptr<LibCommons::Buffers::IBuffer> pReceiveBuffer,
         std::unique_ptr<LibCommons::Buffers::IBuffer> pSendBuffer);
 
-    // 기본 소멸 처리.
-    virtual ~IOSession() override = default;
+    // # 소멸 시점 불변식 검증
+    virtual ~IOSession() override;
 
     // 세션 고유 식별자 조회.
     virtual uint64_t GetSessionId() const override { return m_SessionId; }
@@ -76,6 +76,7 @@ public:
     }
 
     // Design Ref: session-idle-timeout §4.2 — 사유 파라미터 오버로드.
+    // 
     // IIdleAware::RequestDisconnect 구현. 내부적으로 기존 RequestDisconnect() 경로와 통합.
     void RequestDisconnect(DisconnectReason reason) override;
 
@@ -83,13 +84,42 @@ public:
     void RequestDisconnect();
 
 protected:
+    // # outstanding I/O 증가 (외부 posting 포함)
+    void AddOutstandingIo() noexcept
+    {
+        m_OutstandingIoCount.fetch_add(1, std::memory_order_acq_rel);
+    }
+
+    // # disconnect 상태 조회
+    bool IsDisconnectRequested() const noexcept
+    {
+        return m_DisconnectRequested.load(std::memory_order_acquire);
+    }
+
+    // # 종료 콜백 단일 발화
+    void TryFireOnDisconnected();
+
+    // # 테스트 전용 outstanding 설정
+    void DebugSetOutstandingIoCountForTest(int outstanding) noexcept
+    {
+        m_OutstandingIoCount.store(outstanding, std::memory_order_release);
+    }
+
+    // # 테스트 전용 outstanding 조회
+    int DebugGetOutstandingIoCountForTest() const noexcept
+    {
+        return m_OutstandingIoCount.load(std::memory_order_acquire);
+    }
+
     // 세션 활성화 시 최초 1회 receive loop 시작.
+    // # 최초 수신 루프 개시
     void StartReceiveLoop();
 
     // 연결 종료 이벤트 처리
     virtual void OnDisconnected() override {}
 
     // 지속 수신을 위한 Recv 재등록.
+    // # 수신 재등록 진입점
     void RequestReceived();
 
     // 세션 소켓 조회.
@@ -132,6 +162,16 @@ protected:
     OverlappedEx m_RecvOverlapped{};
     OverlappedEx m_SendOverlapped{};
 
+    // # 완료 통지 수명 보호
+    struct IoCompletionGuard
+    {
+        std::shared_ptr<IOSession> Self;
+        explicit IoCompletionGuard(std::shared_ptr<IOSession>& s) noexcept : Self(s) {}
+        ~IoCompletionGuard() noexcept;
+        IoCompletionGuard(const IoCompletionGuard&) = delete;
+        IoCompletionGuard& operator=(const IoCompletionGuard&) = delete;
+    };
+
 private:
     // 송신 큐 적재 및 비동기 송신 트리거.
     void SendBuffer(std::span<const std::byte> data);
@@ -160,6 +200,10 @@ private:
     // Send 완료 처리 분기.
     void HandleSendCompletion(bool bSuccess, DWORD bytesTransferred);
 
+protected:
+    // # posting 실패 카운터 복구
+    void UndoOutstandingOnFailure(const char* site) noexcept;
+
 private:
     // 활성화 훅에서 최초 receive loop 시작 중복 방지.
     std::atomic_bool m_ReceiveLoopStarted = false;
@@ -171,6 +215,12 @@ private:
     std::atomic_bool m_SendInProgress = false;
 
     std::atomic_bool m_DisconnectRequested = false;
+
+    // # outstanding I/O 카운터
+    std::atomic<int> m_OutstandingIoCount { 0 };
+
+    // # 종료 콜백 중복 차단
+    std::atomic_bool m_bOnDisconnectedFired = false;
 
     // Design Ref: session-idle-timeout §3, §4.2 — 마지막 수신 시각 (steady_clock epoch-ms).
     // 0 은 아직 수신 이력 없음. OnIOCompleted 의 Real Recv 성공 경로(bytes > 0) 에서 갱신.

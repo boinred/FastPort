@@ -253,11 +253,48 @@ void LatencyBenchmarkRunner::RunBenchmark()
         m_Results = m_LatencyCollector.Calculate(m_Config.testName, m_Config.payloadSize);
         SetState(BenchmarkState::Completed);
         if (m_Callbacks.onCompleted) m_Callbacks.onCompleted(m_Results);
+
+        // Graceful teardown — iosession-lifetime-race §2.3 Rule D1 준수.
+        // 지역 pSession 이 scope 을 벗어나기 전에 RequestDisconnect 로 outstanding I/O 를
+        // drain 하고, OnDisconnected 까지 기다려 `counter==0 && fired==true` 불변식을
+        // 확보한 후에만 세션을 소멸시킨다. 그렇지 않으면 ~IOSession 시점에 Recv 가
+        // pending 상태로 남아 IOCP 워커가 해제된 포인터에 접근하며 AV 발생 (Exit code
+        // 0xC0000005). m_Service->Stop() 순서만으로는 이 race 를 봉쇄할 수 없다.
+        DisconnectAndWaitDrain(pSession);
     }
     catch (const std::exception& ex)
     {
         SetState(BenchmarkState::Failed);
         if (m_Callbacks.onError) m_Callbacks.onError(ex.what());
+    }
+}
+
+// Graceful teardown helper — Disconnect() 호출 후 DisconnectHandler 가 트리거될
+// 때까지 condition_variable 로 대기. 타임아웃은 최후 방어선 (5s) 으로, 정상 경로는
+// 수십~수백 ms 내에 drain 된다.
+void LatencyBenchmarkRunner::DisconnectAndWaitDrain(const shared_ptr<IBenchmarkSession>& pSession)
+{
+    if (!pSession) return;
+
+    std::mutex waitMutex;
+    std::condition_variable waitCv;
+    bool drained = false;
+
+    pSession->SetDisconnectHandler([&]()
+    {
+        std::lock_guard<std::mutex> lock(waitMutex);
+        drained = true;
+        waitCv.notify_all();
+    });
+
+    pSession->Disconnect();
+
+    std::unique_lock<std::mutex> lock(waitMutex);
+    if (!waitCv.wait_for(lock, std::chrono::seconds(5), [&] { return drained; }))
+    {
+        LibCommons::Logger::GetInstance().LogError("LatencyBenchmarkRunner",
+            "Teardown drain timeout — session 이 OnDisconnected 발화 전에 teardown 종료. "
+            "Outstanding I/O 가 남아있을 수 있어 직후 세션 소멸 시 UAF 위험.");
     }
 }
 

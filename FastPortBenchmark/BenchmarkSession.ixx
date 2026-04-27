@@ -37,6 +37,10 @@ public:
 
     virtual void SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage) = 0;
     virtual bool IsConnected() const = 0;
+
+    // Graceful teardown — pending I/O drain 을 유도. RunBenchmark 종료 시
+    // DisconnectHandler 의 CV signal 과 결합해 OnDisconnected 까지 대기할 수 있도록 한다.
+    virtual void Disconnect() = 0;
 };
 
 // IOCP 기반 벤치마크 세션
@@ -63,6 +67,12 @@ public:
     {
         // OutboundSession::SendMessage 호출
         LibNetworks::Sessions::OutboundSession::SendMessage(packetId, rfMessage);
+    }
+
+    // IOSession 의 비동기 멱등 RequestDisconnect 경로로 drain 유도.
+    void Disconnect() override
+    {
+        LibNetworks::Sessions::OutboundSession::RequestDisconnect();
     }
 
 protected:
@@ -118,6 +128,13 @@ public:
     {
         // RIOSession::SendMessage 호출
         LibNetworks::Sessions::RIOSession::SendMessage(packetId, rfMessage);
+    }
+
+    // RIO 는 v1 freeze 상태로 별도 RequestDisconnect 가 없어 현재 no-op.
+    // 추후 RIOSession 에 명시적 disconnect/drain 경로가 생기면 이관.
+    void Disconnect() override
+    {
+        // Intentionally empty — RIO v1 freeze.
     }
 
 protected:

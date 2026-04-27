@@ -258,10 +258,17 @@ public:
         const int beforeStop = mock->disconnectCount.load();
         checker.Stop();
 
-        std::this_thread::sleep_for(300ms);
+        // Stop() 는 진행 중인 tick 완료까지 대기한다. 따라서 Stop 직전 샘플(beforeStop)은
+        // in-flight tick 을 포함하지 못할 수 있다. Stop 반환 이후 값을 기준으로 추가 tick
+        // 여부만 검증해야 한다.
         const int afterStop = mock->disconnectCount.load();
 
-        Assert::AreEqual(beforeStop, afterStop,
+        std::this_thread::sleep_for(300ms);
+        const int finalCount = mock->disconnectCount.load();
+
+        Assert::IsTrue(afterStop >= beforeStop,
+            L"Stop 반환 시점 카운트는 Stop 직전 샘플보다 작아지면 안 됨");
+        Assert::AreEqual(afterStop, finalCount,
             L"Stop 이후 disconnect 카운트가 증가하면 안 됨");
     }
 

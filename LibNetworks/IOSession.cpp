@@ -45,12 +45,53 @@ IOSession::IOSession(const std::shared_ptr<Core::Socket>& pSocket,
     m_RecvOverlapped.Buffers.resize(16 * 1024);
 }
 
+// # 소멸 시점 불변식 검증
+IOSession::~IOSession()
+{
+    const int finalCount = m_OutstandingIoCount.load(std::memory_order_acquire);
+    const bool wasDisconnectRequested = m_DisconnectRequested.load(std::memory_order_acquire);
+    const bool wasOnDisconnectedFired = m_bOnDisconnectedFired.load(std::memory_order_acquire);
+
+    if (finalCount != 0)
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession",
+            "~IOSession() invariant violation. Session Id : {}, Outstanding : {}, DisconnectRequested : {}, OnDisconnectedFired : {}",
+            GetSessionId(), finalCount, wasDisconnectRequested, wasOnDisconnectedFired);
+        return;
+    }
+
+    LibCommons::Logger::GetInstance().LogDebug("IOSession",
+        "~IOSession() Session Id : {}, DisconnectRequested : {}, OnDisconnectedFired : {}",
+        GetSessionId(), wasDisconnectRequested, wasOnDisconnectedFired);
+}
+
+// # 완료 통지 종료 게이트
+IOSession::IoCompletionGuard::~IoCompletionGuard() noexcept
+{
+    std::shared_ptr<IOSession> pIOSession = Self; 
+
+    const int previousCount = pIOSession->m_OutstandingIoCount.fetch_sub(1, std::memory_order_acq_rel);
+    if (previousCount == 1 && pIOSession->m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        pIOSession->TryFireOnDisconnected();
+    }
+}
+
+// # 종료 이후 송신 차단
 void IOSession::SendBuffer(std::span<const std::byte> data)
 {
     if (data.empty() || !m_pSendBuffer)
     {
         LibCommons::Logger::GetInstance().LogError("IOSession", "SendBuffer() Invalid parameters. Session Id : {}", GetSessionId());
 
+        return;
+    }
+
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        LibCommons::Logger::GetInstance().LogDebug("IOSession",
+            "SendBuffer() skipped after disconnect request. Session Id : {}",
+            GetSessionId());
         return;
     }
 
@@ -91,11 +132,19 @@ static void WriteToBuffers(const std::vector<std::span<std::byte>>& buffers, siz
     }
 }
 
+// # 종료 이후 메시지 차단
 void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Message& rfMessage)
 {
     const size_t bodySize = rfMessage.ByteSizeLong();
     const size_t totalSize = Core::Packet::GetHeaderSize() + Core::Packet::GetPacketIdSize() + bodySize;
 
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        LibCommons::Logger::GetInstance().LogDebug("IOSession",
+            "SendMessage() skipped after disconnect request. Session Id : {}, Packet Id : {}",
+            GetSessionId(), packetId);
+        return;
+    }
 
     std::vector<std::span<std::byte>> buffers;
     // 링버퍼에 직접 공간 예약 (실패 시 전송 불가)
@@ -137,8 +186,14 @@ void IOSession::SendMessage(const uint16_t packetId, const google::protobuf::Mes
     TryPostSendFromQueue();
 }
 
+// # 최초 수신 루프 개시
 void IOSession::StartReceiveLoop()
 {
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
     bool expected = false;
     if (!m_ReceiveLoopStarted.compare_exchange_strong(expected, true))
     {
@@ -148,8 +203,14 @@ void IOSession::StartReceiveLoop()
     RequestReceived();
 }
 
+// # 수신 재등록 진입점
 void IOSession::RequestReceived()
 {
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
     // 이미 진행 중인지 확인
     bool expected = false;
     if (!m_RecvInProgress.compare_exchange_strong(expected, true))
@@ -165,6 +226,7 @@ void IOSession::RequestReceived()
     }
 }
 
+// # 수신 posting 준비
 bool IOSession::PrepareRecvBuffers(bool bZeroByte)
 {
     m_RecvOverlapped.ResetOverlapped();
@@ -206,12 +268,21 @@ bool IOSession::PrepareRecvBuffers(bool bZeroByte)
     return true;
 }
 
+// # 수신 posting 카운터 증가
 bool IOSession::RequestRecv(bool bZeroByte)
 {
     if (!PrepareRecvBuffers(bZeroByte))
     {
         return false;
     }
+
+    if (!m_pSocket)
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "RequestRecv() Socket is null. Session Id : {}", GetSessionId());
+        return false;
+    }
+
+    m_OutstandingIoCount.fetch_add(1, std::memory_order_acq_rel);
 
     DWORD flags = 0;
     DWORD bytes = 0;
@@ -230,6 +301,7 @@ bool IOSession::RequestRecv(bool bZeroByte)
         if (err != WSA_IO_PENDING)
         {
             LibCommons::Logger::GetInstance().LogError("IOSession", "RequestRecv() WSARecv failed. Session Id : {}, Error Code : {}, ZeroByte : {}", GetSessionId(), err, bZeroByte);
+            UndoOutstandingOnFailure("RequestRecv");
             return false;
         }
     }
@@ -237,6 +309,7 @@ bool IOSession::RequestRecv(bool bZeroByte)
     return true;
 }
 
+// # 송신 posting 준비
 void IOSession::PrepareSendBuffers(const std::vector<std::span<const std::byte>>& buffers, size_t bytesToSend)
 {
     m_SendOverlapped.RequestedBytes = bytesToSend;
@@ -254,8 +327,14 @@ void IOSession::PrepareSendBuffers(const std::vector<std::span<const std::byte>>
     }
 }
 
+// # 송신 posting 카운터 증가
 bool IOSession::TryPostSendFromQueue()
 {
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        return false;
+    }
+
     // Send는 outstanding 1개만 유지
     bool expected = false;
     if (!m_SendInProgress.compare_exchange_strong(expected, true))
@@ -280,6 +359,15 @@ bool IOSession::TryPostSendFromQueue()
 
     PrepareSendBuffers(buffers, bytesToSend);
 
+    if (!m_pSocket)
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession", "TryPostSendFromQueue() Socket is null. Session Id : {}", GetSessionId());
+        m_SendInProgress.store(false);
+        return false;
+    }
+
+    m_OutstandingIoCount.fetch_add(1, std::memory_order_acq_rel);
+
     DWORD bytesSent = 0;
     int result = ::WSASend(m_pSocket->GetSocket(),
         m_SendOverlapped.WSABufs.data(),
@@ -296,6 +384,7 @@ bool IOSession::TryPostSendFromQueue()
         {
             LibCommons::Logger::GetInstance().LogError("IOSession", "TryPostSendFromQueue() WSASend failed. Session Id : {}, Error Code : {}", GetSessionId(), err);
 
+            UndoOutstandingOnFailure("TryPostSendFromQueue");
             m_SendInProgress.store(false);
             return false;
         }
@@ -304,6 +393,7 @@ bool IOSession::TryPostSendFromQueue()
     return true;
 }
 
+// # 제로바이트 수신 전환
 void IOSession::HandleZeroByteRecvCompletion(DWORD bytesTransferred)
 {
     if (bytesTransferred == 0)
@@ -319,6 +409,7 @@ void IOSession::HandleZeroByteRecvCompletion(DWORD bytesTransferred)
     m_RecvInProgress.store(false);
 }
 
+// # 실제 수신 후속 처리
 void IOSession::HandleRealRecvCompletion(DWORD bytesTransferred)
 {
     if (bytesTransferred == 0)
@@ -345,12 +436,23 @@ void IOSession::HandleRealRecvCompletion(DWORD bytesTransferred)
     // Design Ref: server-status §3.3 — 누적 수신 바이트.
     m_TotalRxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
 
+    // # 멱등성 및 Rule D1 준수: 종료 요청 상태라면 상위 레이어로 패킷을 배달하지 않는다.
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        LibCommons::Logger::GetInstance().LogDebug("IOSession",
+            "HandleRealRecvCompletion() dropping data dispatch due to disconnect request. Session Id : {}",
+            GetSessionId());
+        m_RecvInProgress.store(false);
+        return;
+    }
+
     ReadReceivedBuffers();
 
     m_RecvInProgress.store(false);
     RequestReceived();
 }
 
+// # 수신 완료 분기
 void IOSession::HandleRecvCompletion(bool bSuccess, DWORD bytesTransferred)
 {
     if (!bSuccess)
@@ -370,6 +472,7 @@ void IOSession::HandleRecvCompletion(bool bSuccess, DWORD bytesTransferred)
     HandleRealRecvCompletion(bytesTransferred);
 }
 
+// # 송신 완료 후속 처리
 void IOSession::HandleSendCompletion(bool bSuccess, DWORD bytesTransferred)
 {
     m_SendInProgress.store(false);
@@ -390,21 +493,35 @@ void IOSession::HandleSendCompletion(bool bSuccess, DWORD bytesTransferred)
     // Design Ref: server-status §3.3 — 누적 송신 바이트.
     m_TotalTxBytes.fetch_add(bytesTransferred, std::memory_order_relaxed);
 
+    // # 종료 요청 이후 상위 송신 콜백 차단
+    if (m_DisconnectRequested.load(std::memory_order_acquire))
+    {
+        LibCommons::Logger::GetInstance().LogDebug("IOSession",
+            "HandleSendCompletion() skipping OnSent due to disconnect request. Session Id : {}",
+            GetSessionId());
+        return;
+    }
+
     OnSent(bytesTransferred);
 
     const bool hasPending = m_pSendBuffer && (m_pSendBuffer->CanReadSize() > 0);
-    if (hasPending)
+    if (hasPending && !m_DisconnectRequested.load(std::memory_order_acquire))
     {
         TryPostSendFromQueue();
     }
 }
 
+// # 완료 통지 수명 보호
 void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped)
 {
     if (!pOverlapped)
     {
         return;
     }
+
+    auto pIOSession = shared_from_this();
+
+    IoCompletionGuard guard(pIOSession);
 
     // 멤버 Overlapped 주소로 구분
     if (pOverlapped == &(m_RecvOverlapped.Overlapped))
@@ -418,8 +535,13 @@ void IOSession::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED*
         HandleSendCompletion(bSuccess, bytesTransferred);
         return;
     }
+
+    LibCommons::Logger::GetInstance().LogError("IOSession",
+        "OnIOCompleted() Unknown OVERLAPPED. Session Id : {}",
+        GetSessionId());
 }
 
+// # 수신 버퍼 프레이밍 처리
 void IOSession::ReadReceivedBuffers()
 {
     if (!m_pReceiveBuffer)
@@ -431,6 +553,15 @@ void IOSession::ReadReceivedBuffers()
 
     while (true)
     {
+        // # 종료 요청 이후 추가 프레임 처리 차단
+        if (m_DisconnectRequested.load(std::memory_order_acquire))
+        {
+            logger.LogDebug("IOSession",
+                "ReadReceivedBuffers() stopping due to disconnect request. Session Id : {}",
+                GetSessionId());
+            break;
+        }
+
         auto frame = Core::PacketFramer::TryFrameFromBuffer(*m_pReceiveBuffer);
         if (frame.Result == Core::PacketFrameResult::NeedMore)
         {
@@ -451,12 +582,22 @@ void IOSession::ReadReceivedBuffers()
             break;
         }
 
+        // # 종료 요청 이후 패킷 콜백 차단
+        if (m_DisconnectRequested.load(std::memory_order_acquire))
+        {
+            logger.LogDebug("IOSession",
+                "ReadReceivedBuffers() dropping packet dispatch due to disconnect request. Session Id : {}",
+                GetSessionId());
+            break;
+        }
+
         OnPacketReceived(*frame.PacketOpt);
     }
 }
 
 // Design Ref: session-idle-timeout §4.2 — 기존 호출자(8곳) 호환을 위한 무인자 버전.
 // 내부적으로 Normal 사유로 delegation. 신규 호출부는 가능한 reason 명시 버전 사용 권장.
+// # 기본 종료 요청 위임
 void IOSession::RequestDisconnect()
 {
     RequestDisconnect(DisconnectReason::Normal);
@@ -464,41 +605,74 @@ void IOSession::RequestDisconnect()
 
 // Design Ref: session-idle-timeout §4.2, §6.3 — 이중 호출 방지 CAS + 사유별 로그.
 // IdleChecker 가 tick 콜백에서 직접 호출. m_DisconnectRequested 로 race 안전.
+// # 비동기 종료 전이
 void IOSession::RequestDisconnect(DisconnectReason reason)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
     bool expected = false;
-    if (!m_DisconnectRequested.compare_exchange_strong(expected, true))
+    const bool firstPass = m_DisconnectRequested.compare_exchange_strong(expected, true);
+    if (firstPass)
     {
-        return;
-    }
+        // Idle 감지 시에만 idle duration 부가 로그. 다른 사유는 간단히.
+        if (reason == DisconnectReason::IdleTimeout)
+        {
+            const std::int64_t lastMs = m_LastRecvTimeMs.load(std::memory_order_relaxed);
+            const std::int64_t idleMs = (lastMs > 0) ? (NowMs() - lastMs) : -1;
+            logger.LogInfo("IOSession",
+                "IdleTimeout detected. Session Id : {}, IdleMs : {}",
+                GetSessionId(), idleMs);
+        }
 
-    // Idle 감지 시에만 idle duration 부가 로그. 다른 사유는 간단히.
-    if (reason == DisconnectReason::IdleTimeout)
-    {
-        const std::int64_t lastMs = m_LastRecvTimeMs.load(std::memory_order_relaxed);
-        const std::int64_t idleMs = (lastMs > 0) ? (NowMs() - lastMs) : -1;
+        if (!m_pSocket)
+        {
+            logger.LogWarning("IOSession",
+                "RequestDisconnect() Socket is null. Session Id : {}, Reason : {}",
+                GetSessionId(), static_cast<int>(reason));
+        }
+        else
+        {
+            m_pSocket->Shutdown(SD_BOTH);
+            m_pSocket->Close();
+        }
+
+        m_RecvInProgress.store(false);
+        m_SendInProgress.store(false);
+
         logger.LogInfo("IOSession",
-            "IdleTimeout detected. Session Id : {}, IdleMs : {}",
-            GetSessionId(), idleMs);
+            "RequestDisconnect() initiated. Session Id : {}, Reason : {}, Outstanding : {}",
+            GetSessionId(), static_cast<int>(reason),
+            m_OutstandingIoCount.load(std::memory_order_acquire));
+    }
+    else
+    {
+        logger.LogDebug("IOSession",
+            "RequestDisconnect() idempotent skip. Session Id : {}, Reason : {}",
+            GetSessionId(), static_cast<int>(reason));
     }
 
-    if (!m_pSocket)
+    if (m_OutstandingIoCount.load(std::memory_order_acquire) == 0)
     {
-        logger.LogWarning("IOSession",
-            "RequestDisconnect() Socket is null. Session Id : {}, Reason : {}",
-            GetSessionId(), static_cast<int>(reason));
-        OnDisconnected();
+        TryFireOnDisconnected();
+    }
+}
+
+// # 종료 콜백 단일 발화
+void IOSession::TryFireOnDisconnected()
+{
+    bool expected = false;
+    if (!m_bOnDisconnectedFired.compare_exchange_strong(
+            expected, true,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire))
+    {
         return;
     }
 
-    // 강제 종료: send/recv 중단 + 즉시 close
-    m_pSocket->Shutdown(SD_BOTH);
-    m_pSocket->Close();
-
-    m_RecvInProgress.store(false);
-    m_SendInProgress.store(false);
+    auto& logger = LibCommons::Logger::GetInstance();
+    logger.LogInfo("IOSession",
+        "TryFireOnDisconnected() firing. Session Id : {}",
+        GetSessionId());
 
     if (m_pReceiveBuffer)
     {
@@ -510,11 +684,19 @@ void IOSession::RequestDisconnect(DisconnectReason reason)
         m_pSendBuffer->Clear();
     }
 
-    logger.LogInfo("IOSession",
-        "RequestDisconnect() Socket closed. Session Id : {}, Reason : {}",
-        GetSessionId(), static_cast<int>(reason));
-
     OnDisconnected();
+}
+
+// # posting 실패 카운터 복구
+void IOSession::UndoOutstandingOnFailure(const char* site) noexcept
+{
+    const int previousCount = m_OutstandingIoCount.fetch_sub(1, std::memory_order_acq_rel);
+    if (previousCount <= 0)
+    {
+        LibCommons::Logger::GetInstance().LogError("IOSession",
+            "UndoOutstandingOnFailure() underflow. Session Id : {}, Site : {}, Previous : {}",
+            GetSessionId(), site, previousCount);
+    }
 }
 
 

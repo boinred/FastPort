@@ -42,6 +42,12 @@ public:
 
         m_bRunning = a && b;
 
+        if (!m_bRunning)
+        {
+            m_RunnerA.Disconnect();
+            m_RunnerB.Disconnect();
+        }
+
         if (!a && m_LogCallback) m_LogCallback("[A/B] Server A connection failed");
         if (!b && m_LogCallback) m_LogCallback("[A/B] Server B connection failed");
         if (m_bRunning && m_LogCallback) m_LogCallback("[A/B] Both servers connected");
@@ -95,10 +101,10 @@ public:
     }
 
 private:
-    TestRunner m_RunnerA;
-    TestRunner m_RunnerB;
     MetricsCollector m_MetricsA;
     MetricsCollector m_MetricsB;
+    TestRunner m_RunnerA;
+    TestRunner m_RunnerB;
     LogCallback m_LogCallback;
     bool m_bRunning = false;
 

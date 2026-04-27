@@ -1,5 +1,7 @@
-﻿module;
+module;
 #include <memory>
+#include <functional>
+#include <atomic>
 export module networks.sessions.outbound_session;
 
 import networks.sessions.io_session;
@@ -27,7 +29,7 @@ public:
 
     virtual void OnDisconnected() override;
 
-    // GET : ConnectOverlapped 
+    // GET : ConnectOverlapped
     const OVERLAPPED& GetConnectOverlapped() const { return m_ConnectOverlapped; }
     OVERLAPPED& GetConnectOverlapped()
     {
@@ -37,17 +39,26 @@ public:
 
     virtual OVERLAPPED* GetConnectOverlappedPtr() override { return &m_ConnectOverlapped; }
 
+    void MarkConnectIoPosted() noexcept;
+    void UndoConnectIoOnPostFailure() noexcept;
+    bool IsConnectIoPending() const noexcept { return m_ConnectIoPending.load(std::memory_order_acquire); }
+    void SetActivationObserver(std::function<void()> observer);
+    void SetDisconnectObserver(std::function<void()> observer);
+
 protected:
     void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
-
 
 private:
     bool IsConnectCompletion(const OVERLAPPED* pOverlapped) const;
     bool FinalizeConnect();
     void ApplyConnectedSocketOptions();
+    void NotifyActivationObserver();
+    void NotifyDisconnectObserver();
 
     OVERLAPPED m_ConnectOverlapped;
-
+    std::atomic_bool m_ConnectIoPending { false };
+    std::function<void()> m_ActivationObserver{};
+    std::function<void()> m_DisconnectObserver{};
 };
 
 } // namespace LibNetworks::Sessions

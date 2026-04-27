@@ -62,6 +62,8 @@ void IOCPInboundSession::OnDisconnected()
 
     auto& sessions = LibCommons::SingleTon<SessionContainer>::GetInstance();
     sessions.Remove(GetSessionId());
+
+	LibCommons::Logger::GetInstance().LogInfo("IOCPInboundSession", "Session disconnected. Session Id : {}, Sessions Count : {}", GetSessionId(), sessions.Size());
 }
 
 void IOCPInboundSession::OnPacketReceived(const LibNetworks::Core::Packet& rfPacket)

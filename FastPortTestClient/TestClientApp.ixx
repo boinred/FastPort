@@ -1,4 +1,4 @@
-// Design Ref: §3.2 — TestClientApp (UI layout + app state management)
+﻿// Design Ref: §3.2 — TestClientApp (UI layout + app state management)
 // Plan SC: SC1-SC6 (전체 UI 통합)
 module;
 
@@ -26,6 +26,8 @@ public:
 
     // Design Ref: §3.2 — AppState enum for explicit state management
     enum class AppState { Disconnected, Connecting, Connected, Testing };
+
+    ~TestClientApp() { Shutdown(); }
 
     void Initialize(LogCallback logCb)
     {
@@ -95,8 +97,8 @@ public:
 
     void Shutdown()
     {
-        m_Runner.Disconnect();
         m_ABCompare.Stop();
+        m_Runner.Disconnect();
         m_State = AppState::Disconnected;
     }
 
@@ -564,29 +566,78 @@ private:
             if (m_StressPort < 1)     m_StressPort = 1;
             if (m_StressPort > 65535) m_StressPort = 65535;
 
-            ImGui::InputInt("Target Conns",     &m_StressTargetConns);
-            if (m_StressTargetConns < 1)    m_StressTargetConns = 1;
-            if (m_StressTargetConns > 50000) m_StressTargetConns = 50000;
+            // Design Ref: iosession-lifetime-race v0.2 §5 — Scenario A/B/C 라디오.
+            ImGui::Text("Scenario:");
+            ImGui::SameLine(); ImGui::RadioButton("A Churn",    &m_StressScenario, 0);
+            ImGui::SameLine(); ImGui::RadioButton("B Burst",    &m_StressScenario, 1);
+            ImGui::SameLine(); ImGui::RadioButton("C Combined", &m_StressScenario, 2);
+            ImGui::Separator();
 
-            ImGui::InputInt("Churn rate /sec",  &m_StressChurnRate);
-            if (m_StressChurnRate < 0)    m_StressChurnRate = 0;
-            if (m_StressChurnRate > 1000) m_StressChurnRate = 1000;
+            if (m_StressScenario == 0)
+            {
+                // Scenario A — Churn
+                ImGui::TextDisabled("A: %d conn × %d churn/s × %d sec",
+                    m_StressTargetConns, m_StressChurnRate, m_StressDuration);
+                ImGui::InputInt("Target Conns", &m_StressTargetConns);
+                if (m_StressTargetConns < 1)    m_StressTargetConns = 1;
+                if (m_StressTargetConns > 50000) m_StressTargetConns = 50000;
+                ImGui::InputInt("Churn rate /sec", &m_StressChurnRate);
+                if (m_StressChurnRate < 0)    m_StressChurnRate = 0;
+                if (m_StressChurnRate > 1000) m_StressChurnRate = 1000;
+                ImGui::InputInt("Duration (sec)", &m_StressDuration);
+                if (m_StressDuration < 10)   m_StressDuration = 10;
+                if (m_StressDuration > 3600) m_StressDuration = 3600;
+            }
+            else if (m_StressScenario == 1)
+            {
+                // Scenario B — Burst (1M × 2 round)
+                ImGui::TextDisabled("B: %d session(s) × %d packet × %d round",
+                    m_StressBurstSessions, m_StressBurstPackets, m_StressBurstRounds);
+                ImGui::InputInt("Concurrent Sessions (1~8)", &m_StressBurstSessions);
+                if (m_StressBurstSessions < 1) m_StressBurstSessions = 1;
+                if (m_StressBurstSessions > 8) m_StressBurstSessions = 8;
+                ImGui::InputInt("Packets per Round", &m_StressBurstPackets);
+                if (m_StressBurstPackets < 1000)    m_StressBurstPackets = 1000;
+                if (m_StressBurstPackets > 10000000) m_StressBurstPackets = 10000000;
+                if (ImGui::SmallButton("100k"))  m_StressBurstPackets = 100000;
+                ImGui::SameLine();
+                if (ImGui::SmallButton("1M"))    m_StressBurstPackets = 1000000;
+                ImGui::SameLine();
+                if (ImGui::SmallButton("10M"))   m_StressBurstPackets = 10000000;
+                ImGui::InputInt("Round Count", &m_StressBurstRounds);
+                if (m_StressBurstRounds < 1)  m_StressBurstRounds = 1;
+                if (m_StressBurstRounds > 10) m_StressBurstRounds = 10;
+            }
+            else
+            {
+                // Scenario C — Combined
+                ImGui::TextDisabled("C: %d conn × ~%d pps × %d sec",
+                    m_StressCombinedConns, m_StressCombinedPps, m_StressDuration);
+                ImGui::InputInt("Connection Count", &m_StressCombinedConns);
+                if (m_StressCombinedConns < 1)    m_StressCombinedConns = 1;
+                if (m_StressCombinedConns > 10000) m_StressCombinedConns = 10000;
+                ImGui::InputInt("PPS per Session (ref)", &m_StressCombinedPps);
+                if (m_StressCombinedPps < 1)    m_StressCombinedPps = 1;
+                if (m_StressCombinedPps > 1000) m_StressCombinedPps = 1000;
+                ImGui::InputInt("Duration (sec)", &m_StressDuration);
+                if (m_StressDuration < 10)   m_StressDuration = 10;
+                if (m_StressDuration > 3600) m_StressDuration = 3600;
+            }
 
-            ImGui::InputInt("Duration (sec)",   &m_StressDuration);
-            if (m_StressDuration < 10)   m_StressDuration = 10;
-            if (m_StressDuration > 3600) m_StressDuration = 3600;
-
-            ImGui::RadioButton("IOCP", &m_StressServerMode, 0); ImGui::SameLine();
-            ImGui::RadioButton("RIO",  &m_StressServerMode, 1);
-            ImGui::TextDisabled("(UI label — server is a separate process)");
+            ImGui::Separator();
+            // Server mode: v1 IOCP only. RIO 는 freeze (v1.1 이관).
+            ImGui::RadioButton("IOCP (v1)", &m_StressServerMode, 0); ImGui::SameLine();
+            ImGui::BeginDisabled(true);
+            ImGui::RadioButton("RIO (v1.1)", &m_StressServerMode, 1);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("(UI label — server is a separate process; RIO frozen for v1)");
 
             ImGui::Spacing();
             // Design Ref: iosession-lifetime-race §5.2 — Echo 트래픽 옵션.
-            // Ping-pong 이 돌아야 push_back 재진입이 발생 → UAF race window 확장.
             ImGui::Checkbox("Enable Echo Ping-Pong", &m_StressEnableEcho);
             ImGui::InputInt("Payload Size (bytes)", &m_StressPayloadBytes);
-            if (m_StressPayloadBytes < 1)    m_StressPayloadBytes = 1;
-            if (m_StressPayloadBytes > 8192) m_StressPayloadBytes = 8192;
+            if (m_StressPayloadBytes < 1)      m_StressPayloadBytes = 1;
+            if (m_StressPayloadBytes > 262144) m_StressPayloadBytes = 262144;
             if (ImGui::SmallButton("4 B"))    m_StressPayloadBytes = 4;
             ImGui::SameLine();
             if (ImGui::SmallButton("64 B"))   m_StressPayloadBytes = 64;
@@ -594,6 +645,16 @@ private:
             if (ImGui::SmallButton("1 KB"))   m_StressPayloadBytes = 1024;
             ImGui::SameLine();
             if (ImGui::SmallButton("4 KB"))   m_StressPayloadBytes = 4096;
+            // 참고: 8KB, 16KB 는 안전. 64KB, 256KB 는 현재 Packet header(uint16_t, Packet.ixx §GetHeaderSize)
+            // 한계(65535 B)를 초과 → SendMessage 의 htons(static_cast<uint16_t>(totalSize)) 에서 truncation.
+            // Protocol header 를 uint32_t 로 확장하기 전까지 64KB 이상은 프레이밍이 깨진다는 점에 주의.
+            if (ImGui::SmallButton("8 KB"))   m_StressPayloadBytes = 8192;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("16 KB"))  m_StressPayloadBytes = 16384;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("64 KB"))  m_StressPayloadBytes = 65536;
+            ImGui::SameLine();
+            if (ImGui::SmallButton("256 KB")) m_StressPayloadBytes = 262144;
         }
         ImGui::EndDisabled();
 
@@ -604,18 +665,45 @@ private:
             if (ImGui::Button("Start Stress", ImVec2(180, 0)))
             {
                 TestRunner::StressConfig cfg;
+                cfg.scenario = static_cast<TestRunner::StressScenario>(m_StressScenario);
+                cfg.durationSec  = m_StressDuration;
+                cfg.enableEcho   = m_StressEnableEcho;
+                cfg.payloadBytes = m_StressPayloadBytes;
                 cfg.targetConns     = m_StressTargetConns;
                 cfg.churnRatePerSec = m_StressChurnRate;
-                cfg.durationSec     = m_StressDuration;
-                cfg.enableEcho      = m_StressEnableEcho;
-                cfg.payloadBytes    = m_StressPayloadBytes;
+                cfg.burstConcurrentSessions = m_StressBurstSessions;
+                cfg.burstPacketCount        = m_StressBurstPackets;
+                cfg.burstRoundCount         = m_StressBurstRounds;
+                cfg.combinedConnCount     = m_StressCombinedConns;
+                cfg.combinedPpsPerSession = m_StressCombinedPps;
+
                 if (m_Runner.StartStressMode(m_StressIP, m_StressPort, cfg))
                 {
-                    char buf[160];
-                    snprintf(buf, sizeof(buf),
-                        "Stress started: %d conns, %d churn/s, %d sec, echo=%s (payload %d B)",
-                        cfg.targetConns, cfg.churnRatePerSec, cfg.durationSec,
-                        cfg.enableEcho ? "on" : "off", cfg.payloadBytes);
+                    char buf[200];
+                    const char* scenarioLabel =
+                        (m_StressScenario == 0) ? "A(Churn)" :
+                        (m_StressScenario == 1) ? "B(Burst)" : "C(Combined)";
+                    if (m_StressScenario == 1)
+                    {
+                        snprintf(buf, sizeof(buf),
+                            "Stress started: %s — %d session(s) × %d packet × %d round, echo=%s (payload %d B)",
+                            scenarioLabel, m_StressBurstSessions, m_StressBurstPackets, m_StressBurstRounds,
+                            cfg.enableEcho ? "on" : "off", cfg.payloadBytes);
+                    }
+                    else if (m_StressScenario == 2)
+                    {
+                        snprintf(buf, sizeof(buf),
+                            "Stress started: %s — %d conn × ~%d pps × %d sec, echo=%s (payload %d B)",
+                            scenarioLabel, m_StressCombinedConns, m_StressCombinedPps, m_StressDuration,
+                            cfg.enableEcho ? "on" : "off", cfg.payloadBytes);
+                    }
+                    else
+                    {
+                        snprintf(buf, sizeof(buf),
+                            "Stress started: %s — %d conns, %d churn/s, %d sec, echo=%s (payload %d B)",
+                            scenarioLabel, cfg.targetConns, cfg.churnRatePerSec, cfg.durationSec,
+                            cfg.enableEcho ? "on" : "off", cfg.payloadBytes);
+                    }
                     Log(buf);
                 }
                 else { Log("Stress start failed (already running?)"); }
@@ -648,8 +736,31 @@ private:
         ImGui::Text("Connect Failures : %llu", static_cast<unsigned long long>(failures));
         ImGui::Text("Total Accepted   : %llu", static_cast<unsigned long long>(accepted));
         ImGui::Text("Active           : %d",   active);
-        ImGui::Text("Churned          : %llu", static_cast<unsigned long long>(churned));
-        ImGui::Text("Elapsed          : %d / %d sec", elapsed, m_StressDuration);
+
+        if (m_StressScenario == 1)
+        {
+            // Scenario B — Burst: round + packetsSent + packetsReceived.
+            const int round = st.currentRound.load(std::memory_order_relaxed);
+            const auto sent = st.packetsSent.load(std::memory_order_relaxed);
+            const auto pkts = st.packetsReceived.load(std::memory_order_relaxed);
+            ImGui::Text("Current Round    : %d / %d", round, m_StressBurstRounds);
+            ImGui::Text("Packets Sent     : %llu", static_cast<unsigned long long>(sent));
+            ImGui::Text("Packets Received : %llu", static_cast<unsigned long long>(pkts));
+            ImGui::Text("Elapsed          : %d sec", elapsed);
+        }
+        else if (m_StressScenario == 2)
+        {
+            // Scenario C — Combined: packetsReceived + elapsed / duration.
+            const auto pkts = st.packetsReceived.load(std::memory_order_relaxed);
+            ImGui::Text("Packets Received : %llu", static_cast<unsigned long long>(pkts));
+            ImGui::Text("Elapsed          : %d / %d sec", elapsed, m_StressDuration);
+        }
+        else
+        {
+            // Scenario A — Churn.
+            ImGui::Text("Churned          : %llu", static_cast<unsigned long long>(churned));
+            ImGui::Text("Elapsed          : %d / %d sec", elapsed, m_StressDuration);
+        }
         if (crash)
         {
             ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
@@ -785,10 +896,22 @@ private:
     // 사용자는 smoke test 시 작은 값으로 조정 가능.
     char                                                     m_StressIP[64]         = "127.0.0.1";
     int                                                      m_StressPort           = 6628;
+    // Scenario 선택 (v0.2): 0=A Churn, 1=B Burst, 2=C Combined.
+    int                                                      m_StressScenario       = 0;
+    // Common
+    int                                                      m_StressDuration       = 300;
+    // A / Churn
     int                                                      m_StressTargetConns    = 10000;
     int                                                      m_StressChurnRate      = 100;
-    int                                                      m_StressDuration       = 300;
-    int                                                      m_StressServerMode     = 0;   // 0=IOCP, 1=RIO
+    // B / Burst
+    int                                                      m_StressBurstSessions  = 1;
+    int                                                      m_StressBurstPackets   = 1000000;
+    int                                                      m_StressBurstRounds    = 2;
+    // C / Combined
+    int                                                      m_StressCombinedConns  = 1000;
+    int                                                      m_StressCombinedPps    = 100;
+    // Common echo
+    int                                                      m_StressServerMode     = 0;   // 0=IOCP only (v1). RIO freeze.
     bool                                                     m_StressEnableEcho     = true;
     int                                                      m_StressPayloadBytes   = 4;
 };

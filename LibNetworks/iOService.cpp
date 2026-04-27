@@ -71,7 +71,11 @@ bool IOService::Start(uint32_t threadCount)
                         continue;
                     }
 
-                    logger.LogError("IOService", "Worker thread, GetQueuedCompletionStatus failed. Error: {}", dwError);
+                    // ERROR_OPERATION_ABORTED = “취소된 I/O의 완료 통지
+                    if (ERROR_OPERATION_ABORTED != dwError)
+                    {
+                        logger.LogError("IOService", "Worker thread, GetQueuedCompletionStatus failed. Error: {}", dwError);
+                    }                    
                 }
 
                 if (C_THREAD_SHUTDOWN_COMPLETION_KEY == completionId)

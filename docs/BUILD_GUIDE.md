@@ -75,19 +75,38 @@ msbuild FastPort.slnx /p:Configuration=Release /p:Platform=x64
 
 ```
 FastPort/
-├─ _Output/
+├─ _Builds/
 │  ├─ x64/
 │  │  ├─ Debug/
+│  │  │  ├─ Protocols.dll       ← v0.2+: Dynamic Library (모든 exe 가 import)
+│  │  │  ├─ Protocols.lib       ← Import library (링크 시점에 consumer 가 참조)
 │  │  │  ├─ FastPortServer.exe
+│  │  │  ├─ FastPortServerRIO.exe
 │  │  │  ├─ FastPortClient.exe
+│  │  │  ├─ FastPortTestClient.exe
+│  │  │  ├─ FastPortBenchmark.exe
+│  │  │  ├─ LibNetworksTests.dll
+│  │  │  ├─ LibNetworksRIOTests.dll
 │  │  │  └─ *.pdb
 │  │  └─ Release/
-│  │     ├─ FastPortServer.exe
-│  │     └─ FastPortClient.exe
+│  │     └─ (동일 구성)
 │  └─ ...
 └─ _Intermediate/
    └─ ... (중간 파일)
 ```
+
+### 🔌 Protocols DLL 배포 규약
+
+`Protocols` 는 v0.2 부터 Dynamic Library. 배포/실행 시 다음 준수:
+
+- **Protocols.dll 은 실행 파일(.exe)과 같은 경로에 배치**되어야 함. 현재 프로젝트는
+  통합 `OutDir=$(SolutionDir)\_Builds\$(Platform)\$(Configuration)\` 설정으로
+  자동 충족. 배포 시 exe 와 묶어서 반드시 함께 배포.
+- **Protocols.dll 교체 시 링크된 모든 exe 가 바뀐 버전을 공유**한다. DLL 만
+  독립 hotswap 은 **금지** — 동일 배포 트랜잭션으로 모든 binary 를 동기화할 것.
+- **Protocols.dll 누락 시 Windows loader 오류** ("모듈을 찾을 수 없습니다") 발생.
+  silent failure 아니므로 누락 즉시 감지 가능.
+- 배경/상세: `docs/00-pm/protocols-dll-conversion.prd.md` §4 Risks, §5 Timeline.
 
 ---
 
