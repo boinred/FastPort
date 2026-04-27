@@ -30,6 +30,10 @@ using SessionContainer = LibCommons::Container<
 namespace
 {
 std::atomic<LibNetworks::Admin::AdminPacketHandler*> g_pAdminHandler { nullptr };
+
+constexpr size_t kSessionBufferSize = 64 * 1024;
+constexpr unsigned long kListenBacklog = 1024;
+constexpr unsigned int kInitialAcceptCount = 256;
 }
 
 // IOCPInboundSession.cpp 에서 extern 으로 선언/호출 (동일 exe 내 링크).
@@ -45,19 +49,26 @@ void IOCPServiceMode::OnStarted()
 
     auto pOnFuncCreateSession = [](const std::shared_ptr<LibNetworks::Core::Socket>& pSocket) -> std::shared_ptr<LibNetworks::Sessions::INetworkSession>
         {
-            auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
-            auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(8 * 1024);
+            auto pReceiveBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(kSessionBufferSize);
+            auto pSendBuffer = std::make_unique<LibCommons::Buffers::CircleBufferQueue>(kSessionBufferSize);
             return std::make_shared<IOCPInboundSession>(pSocket, std::move(pReceiveBuffer), std::move(pSendBuffer));
         };
 
-    m_Acceptor = LibNetworks::Core::IOSocketAcceptor::Create(LibNetworks::Core::Socket::ENetworkMode::IOCP, m_ListenSocket, pOnFuncCreateSession, C_LISTEN_PORT, 5, std::thread::hardware_concurrency() * 2, 2);
+    m_Acceptor = LibNetworks::Core::IOSocketAcceptor::Create(
+        LibNetworks::Core::Socket::ENetworkMode::IOCP,
+        m_ListenSocket,
+        pOnFuncCreateSession,
+        C_LISTEN_PORT,
+        kListenBacklog,
+        std::thread::hardware_concurrency() * 2,
+        kInitialAcceptCount);
     m_bRunning = nullptr != m_Acceptor;
 
     using namespace std::chrono_literals;
 
     // Design Ref: session-idle-timeout §4.4 — SessionIdleChecker.
     LibNetworks::Sessions::IdleCheckerConfig idleCfg;
-    idleCfg.thresholdMs    = 10'000ms;
+    idleCfg.thresholdMs    = 60'000ms;
     idleCfg.tickIntervalMs = 1'000ms;
     idleCfg.enabled        = true;
 

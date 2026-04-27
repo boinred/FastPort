@@ -17,6 +17,11 @@ export struct BenchmarkConfig
     size_t iterations = 10000;          // 반복 횟수
     size_t warmupIterations = 100;      // 워밍업 횟수
     size_t payloadSize = 64;            // 페이로드 크기 (바이트)
+    size_t payloadMinSize = 0;          // 랜덤 페이로드 최소 크기. 0이면 payloadSize 사용
+    size_t payloadMaxSize = 0;          // 랜덤 페이로드 최대 크기. 0이면 payloadSize 사용
+    size_t payloadPoolSize = 1024;      // 사전 생성 payload 개수
+    size_t sessionCount = 1;            // 실제 연결 세션 수
+    uint32_t ioThreadCount = 2;         // IOCP 워커 스레드 수
     
     uint32_t timeoutMs = 5000;          // 응답 타임아웃 (밀리초)
     bool verbose = false;               // 상세 출력

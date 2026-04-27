@@ -4,123 +4,196 @@
 
 **Windows IOCP 및 RIO 기반 고성능 비동기 네트워크 프레임워크**
 
-C++20 모듈을 사용하여 구현된 확장 가능한 네트워크 라이브러리로, 전통적인 IOCP와 최신 고성능 Registered I/O(RIO) 확장을 모두 지원합니다.
+FastPort는 C++20 모듈 기반 네트워킹 프로젝트입니다. 현재 최적화 기준선은 IOCP Release Windows 서비스 모드에서 1000개의 실제 TCP 세션과 4K-16K 랜덤 binary payload를 사용하는 benchmark입니다.
 
 ---
 
-## 🎯 프로젝트 개요
+## 프로젝트 개요
 
 | 항목 | 내용 |
 |------|------|
-| **목적** | IOCP 및 RIO를 모두 지원하는 고성능 네트워킹 프레임워크 설계 및 구현 |
-| **유형** | 개인 프로젝트 |
-| **개발 환경** | Windows, Visual Studio 2022 (v145+), C++20 |
+| 목표 | Windows 고성능 네트워킹 프레임워크 구현 및 최적화 |
+| 주 엔진 | IOCP |
+| 보조 엔진 | RIO, 별도 RIO 프로젝트에서 관리 |
+| 언어 | C++20 modules (`.ixx`) |
+| 플랫폼 | Windows x64 |
+| 툴체인 | Visual Studio / MSBuild |
 
 ---
 
-## 🛠 기술 스택
+## 기술 스택
 
 | 분류 | 기술 |
 |------|------|
-| **언어** | C++20 (Modules `.ixx`) |
-| **비동기 I/O** | Windows **IOCP** & **RIO (Registered I/O)** |
-| **네트워크** | Winsock2, AcceptEx, ConnectEx, RIO Extension |
-| **직렬화** | Protocol Buffers (protobuf) |
-| **로깅** | spdlog |
-| **동기화** | SRWLock, std::mutex, atomic |
-| **패키지 관리** | vcpkg |
+| 비동기 I/O | Windows IOCP, AcceptEx, ConnectEx |
+| RIO | `LibNetworksRIO`, `FastPortServerRIO` |
+| 직렬화 | Protocol Buffers |
+| 로깅 | spdlog 래퍼인 `LibCommons::Logger` |
+| CLI | cxxopts |
+| 패키지 관리 | vcpkg |
 
 ---
 
-## ✨ 핵심 구현 내용
+## 핵심 구현 내용
 
-### 1. IOCP 엔진 (기본 모드)
-- **비동기 I/O 처리**: 하드웨어 동시성에 최적화된 워커 스레드 풀 및 IOCP 관리.
-- **비동기 Accept/Connect**: `AcceptEx`와 `ConnectEx`를 사용한 완전 비동기 연결 관리.
-- **Zero-Byte Recv**: 유휴 세션에 대한 커널 페이지 잠금(Page Locking) 리소스 낭비 방지.
-- **1-Outstanding Send**: 세션당 하나의 송신 요청만 유지하여 순차 전송 보장 및 커널 리소스 절약.
-- **Scatter-Gather I/O**: `WSABUF` 배열을 활용한 Zero-copy 데이터 전송.
+### IOCP 엔진
 
-### 2. RIO 엔진 (고성능 모드)
-- **직접 버퍼 액세스**: `RioBufferManager`를 통해 미리 등록된 메모리 청크를 사용하여 시스템 콜 오버헤드 최소화.
-- **대용량 패킷 스트리밍**: **전송 대기 큐(Pending Send Queue)**를 통해 RIO 버퍼 크기를 초과하는 대용량 데이터(예: 1MB)도 안정적으로 분할 전송.
-- **Fast-Path 최적화**: 작은 패킷 전송 시 큐를 거치지 않고 버퍼에 직접 기록하여 지연 시간 최소화.
+- `AcceptEx`, `ConnectEx` 기반 비동기 연결 처리.
+- IOCP completion port 기반 worker thread 처리.
+- idle session 효율을 위한 zero-byte receive.
+- 세션당 one-outstanding-send 방식의 순차 송신.
+- `WSABUF` 기반 scatter/gather send path.
+- session idle checker 및 server status/admin 지원.
 
-### 3. 안정성 및 신뢰성
-- **Backpressure (흐름 제어)**: 대기 중인 데이터 총량을 모니터링하고 안전 제한(기본 10MB)을 초과할 경우 제어하여 메모리 고갈(OOM) 방지.
-- **Delayed Consume**: 실제 I/O 완료가 확인된 시점에만 송신 버퍼 데이터를 제거하여 전송 신뢰성 확보.
+### Benchmark
 
----
+- `FastPortBenchmark`를 통한 실제 다중 세션 benchmark 지원.
+- 랜덤 payload 범위와 사전 생성 payload pool 지원.
+- 연결 수, warmup 응답 수, 측정 응답 수, 구간별 elapsed, payload 범위를 보여주는 Debug Profile 지표.
+- 재현 가능한 benchmark evidence를 위한 CSV 출력.
 
-## 🏗 아키텍처
+### Release 서비스 모드
 
-FastPort는 실행 시점에 모드를 선택할 수 있는 듀얼 엔진 구조를 가지고 있습니다.
+`FastPortServer`는 Debug 빌드에서는 console process로 실행되고, Release 빌드에서는 Windows 서비스로 실행됩니다.
 
-```mermaid
-graph TB
-    subgraph Application["Application Layer"]
-        Server[FastPortServer]
-        Client[FastPortClient]
-        Benchmark[FastPortBenchmark]
-    end
+서비스 이름:
 
-    subgraph Service["Service Layer (Hybrid)"]
-        IOService[IOService<br/>IOCP 엔진]
-        RIOService[RIOService<br/>RIO 엔진]
-    end
-
-    subgraph Session["Session Layer"]
-        IOSession[IOSession]
-        RIOSession[RIOSession]
-    end
-    
-    Server --> Service
-    Client --> Service
-    Service --> Session
+```text
+FastPortServerIOCP
 ```
 
 ---
 
-## 🔧 빌드 및 실행
+## 빌드
 
-### 요구 사항
-- Windows 10 이상
-- Visual Studio 2022 이상
-- vcpkg 의존성: `spdlog`, `protobuf`, `grpc`, `cxxopts`
+개발자 PowerShell에서 실행:
 
-### 서버 실행 방법
-
-**1. 기본 (IOCP) 모드:**
-```bash
-./FastPortServer.exe
+```powershell
+& 'C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\amd64\MSBuild.exe' `
+  '.\FastPort.slnx' `
+  '/t:FastPortServer;FastPortBenchmark' `
+  '/p:Configuration=Release;Platform=x64' `
+  /m /nologo /v:minimal
 ```
 
-**2. RIO 모드 (고성능):**
-```bash
-./FastPortServer.exe --rio
+Debug 빌드:
+
+```powershell
+& 'C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\amd64\MSBuild.exe' `
+  '.\FastPort.slnx' `
+  '/t:FastPortServer;FastPortBenchmark' `
+  '/p:Configuration=Debug;Platform=x64' `
+  /m /nologo /v:minimal
 ```
 
-### 벤치마크 실행 방법
+빌드 결과 위치:
 
-```bash
-# IOCP 성능 측정 (기본)
-./FastPortBenchmark.exe --mode iocp
-
-# RIO 성능 측정
-./FastPortBenchmark.exe --mode rio
+```text
+_Builds\x64\Debug
+_Builds\x64\Release
 ```
 
 ---
 
-## 🚀 향후 개선 계획
+## IOCP 서버 실행
 
-- [x] **RIO (Registered I/O) 지원**: 핵심 기능 통합 완료.
-- [ ] **세션 매니저 고도화**: 멀티 코어 대응 세션 맵 분할 최적화.
-- [ ] **메모리 풀 (Object Pool)**: 객체 재사용을 통한 시스템 부하 감소.
-- [ ] **TLS/SSL 지원**: 보안 전송 레이어 통합.
+### Debug Console Mode
+
+```powershell
+.\_Builds\x64\Debug\FastPortServer.exe
+```
+
+### Release Service Mode
+
+관리자 PowerShell에서 실행:
+
+```powershell
+.\_Builds\x64\Release\FastPortServer.exe install
+sc.exe start FastPortServerIOCP
+sc.exe query FastPortServerIOCP
+```
+
+서비스 중지/제거:
+
+```powershell
+sc.exe stop FastPortServerIOCP
+.\_Builds\x64\Release\FastPortServer.exe uninstall
+```
+
+IOCP 서버는 `6628` 포트를 listen합니다.
 
 ---
 
-## 📝 License
+## 현재 기준 Benchmark 실행
+
+현재 최적화 기준 조건:
+
+- Release 서버가 `FastPortServerIOCP` 서비스로 실행 중
+- 실제 TCP 세션 1000개
+- 4096-16384 byte 랜덤 binary payload
+- 측정 request/response 100000회
+- 세션당 warmup request/response 10회
+- benchmark IO thread 8개
+
+```powershell
+.\_Builds\x64\Release\FastPortBenchmark.exe `
+  --port 6628 `
+  --sessions 1000 `
+  --payload-min 4096 `
+  --payload-max 16384 `
+  --iterations 100000 `
+  --warmup 10 `
+  --io-threads 8 `
+  --output docs\evidence\iocp_release_1000.csv
+```
+
+공식 benchmark 문서는 각 scenario를 10회 실행한 aggregate 기준으로 작성합니다. 1회 측정은 smoke check 또는 debugging 용도로만 사용합니다.
+
+---
+
+## 현재 기준 성능
+
+문서: [docs/benchmark-results-05-iocp-release-1000-sessions.md](docs/benchmark-results-05-iocp-release-1000-sessions.md)
+
+| 지표 | 값 |
+|------|------:|
+| 세션 | 1000 / 1000 connected |
+| Payload | 4096-16384 bytes, avg 10346.37 bytes |
+| Iterations | 100000 |
+| Average RTT | 22.5596 ms |
+| P50 RTT | 22.6236 ms |
+| P99 RTT | 33.5659 ms |
+| Throughput | 43526.33 packets/sec |
+| Payload throughput | 429.48 MB/sec |
+| Connection losses | 0 |
+
+이후 최적화 결과는 이 workload를 기준선으로 삼아 `benchmark-results-06-*`, `benchmark-results-07-*` 순서로 기록합니다.
+
+---
+
+## 문서
+
+- [빌드 가이드](docs/BUILD_GUIDE.md)
+- [벤치마크 가이드](docs/BENCHMARK_GUIDE.md)
+- [IOCP 아키텍처](docs/ARCHITECTURE_IOCP.md)
+- [RIO 아키텍처](docs/ARCHITECTURE_RIO.md)
+- [패킷 프로토콜](docs/PACKET_PROTOCOL.md)
+- [프로젝트 구조](docs/PROJECT_STRUCTURE.md)
+
+---
+
+## Roadmap
+
+- [x] IOCP 서비스 모드 benchmark 기준선.
+- [x] 랜덤 payload pool 기반 다중 세션 benchmark.
+- [ ] 10회 반복 aggregate 기준선 확정.
+- [ ] 세션별 configurable in-flight depth.
+- [ ] Zero-copy receive path.
+- [ ] hot packet/session path object pool.
+- [ ] graceful shutdown 및 keep-alive API 정리.
+
+---
+
+## License
 
 MIT License

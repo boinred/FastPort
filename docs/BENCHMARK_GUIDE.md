@@ -2,253 +2,204 @@
 
 [English](BENCHMARK_GUIDE.md) | [한국어](ko/BENCHMARK_GUIDE.md)
 
-This guide explains how to use the FastPort network performance benchmark tool.
+This guide explains how to run `FastPortBenchmark` against the IOCP server.
 
 ---
 
-## 📊 Overview
+## Overview
 
-`FastPortBenchmark` is a tool for measuring the performance of IOCP/RIO-based network servers.
+`FastPortBenchmark` measures request/response round-trip performance for FastPort servers.
+The current optimization baseline targets the IOCP Release Windows service workload:
 
-### Metrics
+- 1000 real TCP sessions
+- 4096-16384 byte random binary payload
+- pre-generated payload pool
+- 100000 measured request/response cycles
+- 10 warmup request/response cycles per session
+- 8 benchmark IO threads
+
+Current baseline document:
+
+[benchmark-results-05-iocp-release-1000-sessions.md](benchmark-results-05-iocp-release-1000-sessions.md)
+
+---
+
+## Metrics
 
 | Metric | Description | Unit |
 |--------|-------------|------|
-| **Latency (RTT)** | Round-trip time for request-response | µs, ms |
-| **Throughput** | Packets/Bytes processed per second | packets/sec, MB/s |
-| **P50/P90/P95/P99** | Percentile Latency | µs |
-| **Std Dev** | Standard Deviation (Jitter) | µs |
+| Latency (RTT) | Round-trip time for request-response | us, ms |
+| Throughput | Packets/bytes completed per second | packets/sec, MB/s |
+| P50/P90/P95/P99 | Percentile latency | us |
+| Std Dev | Latency standard deviation | us |
+| Connected sessions | Number of successfully connected TCP sessions | count |
+| Warmup responses | Responses completed before measurement | count |
+| Measured responses | Responses counted in the benchmark result | count |
 
 ---
 
-## 🚀 Usage
+## Build
 
-### Basic Execution
+Release:
 
 ```powershell
-# 1. Start the server first
-.\FastPortServer.exe
-
-# 2. Run the benchmark (in a separate terminal)
-.\FastPortBenchmark.exe
+& 'C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\amd64\MSBuild.exe' `
+  '.\FastPort.slnx' `
+  '/t:FastPortServer;FastPortBenchmark' `
+  '/p:Configuration=Release;Platform=x64' `
+  /m /nologo /v:minimal
 ```
 
-### Command Line Options
+---
+
+## Run the Release IOCP Server
+
+Release `FastPortServer.exe` runs as a Windows service. Use an elevated PowerShell.
+
+```powershell
+.\_Builds\x64\Release\FastPortServer.exe install
+sc.exe start FastPortServerIOCP
+sc.exe query FastPortServerIOCP
+```
+
+Confirm that port `6628` is listening:
+
+```powershell
+netstat -ano | Select-String ':6628'
+```
+
+Stop and remove:
+
+```powershell
+sc.exe stop FastPortServerIOCP
+.\_Builds\x64\Release\FastPortServer.exe uninstall
+```
+
+---
+
+## Command Line Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--host <ip>` | Server address | 127.0.0.1 |
-| `--port <port>` | Server port | 9000 |
+| `--host <ip>` | Server address | `127.0.0.1` |
+| `--port <port>` | Server port | `9000` |
 | `--mode <mode>` | Network mode: `iocp` or `rio` | `iocp` |
-| `--iterations <n>` | Number of iterations | 10000 |
-| `--warmup <n>` | Number of warmup iterations | 100 |
-| `--payload <bytes>` | Payload size in bytes | 64 |
-| `--output <file>` | Output CSV file path | - |
-| `--verbose` | Enable verbose output | false |
-| `--help` | Show help message | - |
-
-### Examples
-
-```powershell
-# Default test (IOCP mode)
-FastPortBenchmark.exe
-
-# RIO mode test (High Performance)
-FastPortBenchmark.exe --mode rio
-
-# Specify iterations and payload size
-FastPortBenchmark.exe --iterations 1000 --payload 256
-
-# Remote server test + Save to CSV
-FastPortBenchmark.exe --host 192.168.1.100 --port 9001 --output results.csv
-
-# Verbose mode
-FastPortBenchmark.exe --iterations 100 --verbose
-```
+| `--iterations <n>` | Total measured responses | `10000` |
+| `--warmup <n>` | Warmup requests per session | `100` |
+| `--payload <bytes>` | Fixed payload size | `64` |
+| `--payload-min <bytes>` | Random payload minimum size | - |
+| `--payload-max <bytes>` | Random payload maximum size | - |
+| `--payload-pool <n>` | Number of pre-generated payloads | `1024` |
+| `--sessions <n>` | Concurrent TCP sessions | `1` |
+| `--io-threads <n>` | Benchmark IO worker threads | `2` |
+| `--output <file>` | CSV output file | - |
+| `--verbose` | Verbose output | `false` |
+| `--pause-on-exit` | Wait for key before exit in Debug builds | `false` |
+| `--help` | Show help | - |
 
 ---
 
-## 📁 Output Files
+## Current Baseline Command
 
-### CSV Filename Format
+```powershell
+.\_Builds\x64\Release\FastPortBenchmark.exe `
+  --port 6628 `
+  --sessions 1000 `
+  --payload-min 4096 `
+  --payload-max 16384 `
+  --iterations 100000 `
+  --warmup 10 `
+  --io-threads 8 `
+  --output docs\evidence\iocp_release_1000.csv
+```
+
+In multi-session mode, `iterations` is the total measured response count across all sessions.
+`warmup` is applied per session. For example, `--sessions 1000 --warmup 10` sends 10000 warmup request/response cycles.
+
+---
+
+## Official Run Policy
+
+Use separate policies for quick checks and official benchmark documents.
+
+| Purpose | Runs | Usage |
+|---------|-----:|-------|
+| Smoke check | 1 | Confirm the benchmark still completes |
+| Official benchmark | 10 | Document performance and compare optimizations |
+
+For official results, report best, worst, average, median, and standard deviation for:
+
+- Average RTT
+- P50 RTT
+- P99 RTT
+- Packets/sec
+- MB/sec
+
+If any run has connection loss or incomplete responses, record it as a failed run. Do not silently discard it.
+
+---
+
+## CSV Output
 
 Timestamps are automatically appended to output filenames.
 
-```
-results.csv → results_2024-01-15-14-30.csv
-benchmark.csv → benchmark_2024-01-15-14-30.csv
+```text
+results.csv -> results_2026-04-27-11-02-36.4966556.csv
 ```
 
 ### CSV Columns
 
 | Column | Description |
 |--------|-------------|
-| `test_name` | Name of the test |
-| `iterations` | Number of iterations |
-| `payload_size` | Payload size (bytes) |
-| `avg_latency_ns` | Average latency (ns) |
-| `min_latency_ns` | Minimum latency (ns) |
-| `max_latency_ns` | Maximum latency (ns) |
-| `p50_latency_ns` | 50th percentile latency (ns) |
-| `p90_latency_ns` | 90th percentile latency (ns) |
-| `p95_latency_ns` | 95th percentile latency (ns) |
-| `p99_latency_ns` | 99th percentile latency (ns) |
-| `stddev_ns` | Standard deviation (ns) |
+| `test_name` | Test name |
+| `iterations` | Total measured responses |
+| `payload_size` | Fixed payload size or maximum payload size |
+| `avg_latency_ns` | Average latency |
+| `min_latency_ns` | Minimum latency |
+| `max_latency_ns` | Maximum latency |
+| `p50_latency_ns` | P50 latency |
+| `p90_latency_ns` | P90 latency |
+| `p95_latency_ns` | P95 latency |
+| `p99_latency_ns` | P99 latency |
+| `stddev_ns` | Standard deviation |
 | `packets_per_sec` | Packets per second |
-| `mb_per_sec` | Megabytes per second |
+| `mb_per_sec` | MB per second |
+| `requested_sessions` | Requested session count |
+| `connected_sessions` | Successfully connected sessions |
+| `connection_losses` | Lost sessions during the run |
+| `warmup_requests` / `warmup_responses` | Warmup request/response counts |
+| `measured_requests` / `measured_responses` | Measured request/response counts |
+| `payload_min_bytes` / `payload_max_bytes` | Random payload range |
+| `payload_pool_size` | Number of pre-generated payloads |
+| `connect_elapsed_ns` | Session connection elapsed time |
+| `warmup_elapsed_ns` | Warmup elapsed time |
+| `measured_elapsed_ns` | Measured elapsed time |
 
 ---
 
-## 📋 Output Example
-
-```
-======================================
- FastPort Benchmark
-======================================
- Server     : 127.0.0.1:9000
- Iterations : 10000
- Warmup     : 100
- Payload    : 64 bytes
-======================================
-
-Connecting to server...
-Warming up...
-Running benchmark...
-Progress: 100% (10000/10000)
-
-Benchmark completed!
-
-======================================
- Benchmark: LatencyTest
-======================================
- Iterations    : 10000
- Payload Size  : 64 bytes
---------------------------------------
- Latency (RTT):
-   Average     : 125.32 us
-   Min         : 45.20 us
-   Max         : 2450.80 us
-   Median      : 98.50 us
-   P50         : 98.50 us
-   P90         : 185.30 us
-   P95         : 245.60 us
-   P99         : 520.40 us
-   Std Dev     : 85.20 us
---------------------------------------
- Throughput:
-   Packets/sec : 7980.25
-   MB/sec      : 0.49
-   Total Bytes : 640000
-   Elapsed     : 1253.20 ms
-======================================
-
-Results saved to: results_2024-01-15-14-30.csv
-```
-
----
-
-## 📈 Benchmark Scenarios
-
-### 1. Basic Latency Test
-
-```powershell
-FastPortBenchmark.exe --iterations 10000 --payload 64
-```
-
-Measures basic RTT for small packets.
-
-### 2. Large Packet Test
-
-```powershell
-FastPortBenchmark.exe --iterations 1000 --payload 4096
-```
-
-Measures performance for handling large packets.
-
-### 3. Long-Running Stability Test
-
-```powershell
-FastPortBenchmark.exe --iterations 100000 --warmup 1000
-```
-
-Measures performance changes over a long period.
-
-### 4. Comparison Test (IOCP vs RIO)
-
-```powershell
-# Measure IOCP
-FastPortBenchmark.exe --mode iocp --output iocp_result.csv
-
-# Measure RIO
-FastPortBenchmark.exe --mode rio --output rio_result.csv
-
-# Compare results (using Excel or scripts)
-```
-
----
-
-## 🔧 Protocol Specification
-
-### Packet IDs
+## Protocol
 
 | Packet ID | Message | Direction |
 |-----------|---------|-----------|
-| `0x1001` | BenchmarkRequest | Client → Server |
-| `0x1002` | BenchmarkResponse | Server → Client |
+| `0x1001` | BenchmarkRequest | Client to server |
+| `0x1002` | BenchmarkResponse | Server to client |
 
-### BenchmarkRequest
-
-```protobuf
-message BenchmarkRequest {
-    Header header = 1;
-    uint64 client_timestamp_ns = 2;  // Client send timestamp (ns)
-    uint32 sequence = 3;              // Sequence number
-    bytes payload = 4;                // Variable size payload
-}
-```
-
-### BenchmarkResponse
-
-```protobuf
-message BenchmarkResponse {
-    Header header = 1;
-    ResultCode result = 2;
-    uint64 client_timestamp_ns = 3;      // Client original timestamp
-    uint64 server_recv_timestamp_ns = 4; // Server receive timestamp
-    uint64 server_send_timestamp_ns = 5; // Server send timestamp
-    uint32 sequence = 6;                 // Sequence number
-    bytes payload = 7;                   // Payload (Echo)
-}
-```
+`BenchmarkResponse` echoes the payload and carries the original client timestamp.
 
 ---
 
-## ⚠️ Notes
+## Notes
 
-### Warmup
-
-- Warmup is required for initial connection setup and JIT optimization.
-- Default is 100; 1000+ recommended for precise measurement.
-
-### Network Environment
-
-- Use localhost to minimize network delay for pure code performance testing.
-- Consider network bandwidth/latency for remote tests.
-
-### System Load
-
-- Minimize CPU/network usage of other processes.
-- Recommended to average results from multiple runs.
-
-### Interpreting Results
-
-- If P99 latency is significantly higher than average, check for tail latency issues.
-- High Std Dev indicates unstable performance.
+- The baseline benchmark is RTT-based and expects one response per request.
+- It is not a pure send enqueue or maximum in-flight throughput test.
+- The payload pool is generated before the measured section to reduce benchmark-side allocation noise.
+- Use the same server build, client build, command-line arguments, and machine state for comparison runs.
 
 ---
 
-## 🔗 Related Documents
+## Related Documents
 
+- [Current Benchmark Baseline](benchmark-results-05-iocp-release-1000-sessions.md)
 - [IOCP Architecture](ARCHITECTURE_IOCP.md)
 - [RIO Architecture](ARCHITECTURE_RIO.md)
 - [Packet Protocol](PACKET_PROTOCOL.md)

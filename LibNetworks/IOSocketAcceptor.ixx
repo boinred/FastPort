@@ -34,8 +34,8 @@ public:
         OnDoFuncCreateSession pOnDoFuncCreateSession,
         const unsigned short listenPort,
         const unsigned long maxConnectionCount,
-        const unsigned char threadCount,
-        const unsigned char beginAcceptCount = 100);
+        const unsigned int threadCount,
+        const unsigned int beginAcceptCount = 100);
 
     IOSocketAcceptor() = delete;
 
@@ -46,7 +46,7 @@ public:
 protected:
     void OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVERLAPPED* pOverlapped) override;
 private:
-    bool Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount);
+    bool Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned int threadCount, const unsigned int beginAcceptCount);
 
     bool ListenSocket(const unsigned short listenPort, const unsigned long maxConnectionCount);
     bool BeginAcceptEx();

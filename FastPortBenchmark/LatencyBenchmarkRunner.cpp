@@ -25,7 +25,7 @@ namespace FastPortBenchmark
 {
 using namespace std;
 
-static void SendAndWaitResponse(const shared_ptr<IBenchmarkSession>& pSession, const uint32_t seq, BenchmarkWaiter& waiter, const uint32_t timeoutMs)
+static bool SendAndWaitResponse(const shared_ptr<IBenchmarkSession>& pSession, const uint32_t seq, BenchmarkWaiter& waiter, const uint32_t timeoutMs)
 {
     waiter.Reset();
 
@@ -35,7 +35,7 @@ static void SendAndWaitResponse(const shared_ptr<IBenchmarkSession>& pSession, c
 
     pSession->SendMessage(PACKET_ID_BENCHMARK_REQUEST, request);
 
-    waiter.Wait(timeoutMs);
+    return waiter.Wait(timeoutMs);
 }
 
 LatencyBenchmarkRunner::LatencyBenchmarkRunner()
@@ -76,11 +76,70 @@ BenchmarkStats LatencyBenchmarkRunner::GetResults() const { return m_Results; }
 
 void LatencyBenchmarkRunner::SetState(BenchmarkState state)
 {
+    const auto previous = m_State.load(std::memory_order_acquire);
+    if (state != BenchmarkState::Idle &&
+        (previous == state || previous == BenchmarkState::Completed || previous == BenchmarkState::Failed))
+    {
+        return;
+    }
+
     m_State.store(state);
     if (m_Callbacks.onStateChanged) m_Callbacks.onStateChanged(state);
 }
 
 void LatencyBenchmarkRunner::RunBenchmark()
+{
+    try
+    {
+        const bool fixedSingleSession =
+            m_Config.sessionCount <= 1 &&
+            (m_Config.payloadMinSize == 0 || m_Config.payloadMinSize == m_Config.payloadSize) &&
+            (m_Config.payloadMaxSize == 0 || m_Config.payloadMaxSize == m_Config.payloadSize);
+
+        if (fixedSingleSession)
+        {
+            RunSequentialBenchmark();
+        }
+        else
+        {
+            RunMultiSessionBenchmark();
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        SetState(BenchmarkState::Failed);
+        if (m_Callbacks.onError) m_Callbacks.onError(ex.what());
+    }
+}
+
+std::vector<std::string> LatencyBenchmarkRunner::BuildPayloadPool() const
+{
+    const size_t minSize = m_Config.payloadMinSize == 0 ? m_Config.payloadSize : m_Config.payloadMinSize;
+    const size_t maxSize = m_Config.payloadMaxSize == 0 ? minSize : m_Config.payloadMaxSize;
+    const size_t low = (std::min)(minSize, maxSize);
+    const size_t high = (std::max)(minSize, maxSize);
+    const size_t poolSize = (std::max<size_t>)(1, m_Config.payloadPoolSize);
+
+    std::vector<std::string> payloads;
+    payloads.reserve(poolSize);
+
+    std::mt19937_64 rng{ 0x4650535045524655ULL };
+    std::uniform_int_distribution<size_t> sizeDist(low, high);
+
+    for (size_t i = 0; i < poolSize; ++i)
+    {
+        std::string payload(sizeDist(rng), '\0');
+        for (size_t j = 0; j < payload.size(); ++j)
+        {
+            payload[j] = static_cast<char>('A' + ((i + j) % 26));
+        }
+        payloads.push_back(std::move(payload));
+    }
+
+    return payloads;
+}
+
+void LatencyBenchmarkRunner::RunSequentialBenchmark()
 {
     try
     {
@@ -100,9 +159,10 @@ void LatencyBenchmarkRunner::RunBenchmark()
             m_Service = make_shared<LibNetworks::Services::IOService>();
         }
 
-        m_Service->Start(2);
+        m_Service->Start(m_Config.ioThreadCount);
 
         SetState(BenchmarkState::Connecting);
+        const uint64_t connectStartNs = HighResolutionTimer::NowNs();
 
         shared_ptr<IBenchmarkSession> pSession;
         mutex sessionMutex;
@@ -191,10 +251,13 @@ void LatencyBenchmarkRunner::RunBenchmark()
                 return;
             }
         }
+        const uint64_t connectElapsedNs = HighResolutionTimer::NowNs() - connectStartNs;
 
         atomic<uint32_t> lastReceivedSeq{ 0 };
         atomic<uint64_t> lastRecvTimestamp{ 0 };
         BenchmarkWaiter responseWaiter;
+        size_t warmupResponses = 0;
+        uint64_t warmupElapsedNs = 0;
 
         pSession->SetPacketHandler([&](const LibNetworks::Core::Packet& packet)
             {
@@ -213,14 +276,21 @@ void LatencyBenchmarkRunner::RunBenchmark()
         if (m_Config.warmupIterations > 0)
         {
             SetState(BenchmarkState::Warmup);
+            const uint64_t warmupStartNs = HighResolutionTimer::NowNs();
             for (size_t i = 0; i < m_Config.warmupIterations && !m_StopRequested.load(); ++i)
             {
-                SendAndWaitResponse(pSession, static_cast<uint32_t>(i), responseWaiter, m_Config.timeoutMs);
+                if (SendAndWaitResponse(pSession, static_cast<uint32_t>(i), responseWaiter, m_Config.timeoutMs))
+                {
+                    ++warmupResponses;
+                }
             }
+            warmupElapsedNs = HighResolutionTimer::NowNs() - warmupStartNs;
         }
 
         SetState(BenchmarkState::Running);
-        string payload(m_Config.payloadSize, 'X');
+        auto payloads = BuildPayloadPool();
+        const auto& payload = payloads.front();
+        const uint64_t measuredStartNs = HighResolutionTimer::NowNs();
 
         for (size_t i = 0; i < m_Config.iterations && !m_StopRequested.load(); ++i)
         {
@@ -242,7 +312,7 @@ void LatencyBenchmarkRunner::RunBenchmark()
 
             uint64_t recvTime = HighResolutionTimer::NowNs();
             uint64_t rtt = recvTime - sendTime;
-            m_LatencyCollector.AddSample(rtt);
+            m_LatencyCollector.AddSample(rtt, payload.size());
 
             if (m_Callbacks.onProgress && (i % 100 == 0 || i == m_Config.iterations - 1))
             {
@@ -251,6 +321,20 @@ void LatencyBenchmarkRunner::RunBenchmark()
         }
 
         m_Results = m_LatencyCollector.Calculate(m_Config.testName, m_Config.payloadSize);
+        m_Results.debugProfileEnabled = true;
+        m_Results.requestedSessions = 1;
+        m_Results.connectedSessions = 1;
+        m_Results.connectionLosses = 0;
+        m_Results.warmupRequests = m_Config.warmupIterations;
+        m_Results.warmupResponses = warmupResponses;
+        m_Results.measuredRequests = m_Config.iterations;
+        m_Results.measuredResponses = m_Results.iterations;
+        m_Results.payloadMinBytes = payload.size();
+        m_Results.payloadMaxBytes = payload.size();
+        m_Results.payloadPoolSize = payloads.size();
+        m_Results.connectElapsedNs = connectElapsedNs;
+        m_Results.warmupElapsedNs = warmupElapsedNs;
+        m_Results.measuredElapsedNs = HighResolutionTimer::NowNs() - measuredStartNs;
         SetState(BenchmarkState::Completed);
         if (m_Callbacks.onCompleted) m_Callbacks.onCompleted(m_Results);
 
@@ -266,6 +350,291 @@ void LatencyBenchmarkRunner::RunBenchmark()
     {
         SetState(BenchmarkState::Failed);
         if (m_Callbacks.onError) m_Callbacks.onError(ex.what());
+    }
+}
+
+void LatencyBenchmarkRunner::RunMultiSessionBenchmark()
+{
+    if (m_Config.useRio)
+    {
+        throw runtime_error("Multi-session random payload benchmark currently supports IOCP mode only");
+    }
+
+    m_Service = make_shared<LibNetworks::Services::IOService>();
+    m_Service->Start(m_Config.ioThreadCount);
+
+    const auto payloads = BuildPayloadPool();
+    const size_t sessionCount = (std::max<size_t>)(1, m_Config.sessionCount);
+    const size_t totalTarget = (std::max<size_t>)(1, m_Config.iterations);
+    const size_t warmupTarget = m_Config.warmupIterations * sessionCount;
+
+    SetState(BenchmarkState::Connecting);
+    const uint64_t connectStartNs = HighResolutionTimer::NowNs();
+
+    struct SessionContext
+    {
+        std::shared_ptr<IBenchmarkSession> Session;
+        std::atomic<bool> Connected{ false };
+        std::atomic<bool> Active{ true };
+        std::atomic<uint32_t> Sequence{ 0 };
+        std::atomic<uint64_t> SendTimeNs{ 0 };
+        std::atomic<size_t> PayloadIndex{ 0 };
+        size_t SessionIndex = 0;
+    };
+
+    std::mutex connectMutex;
+    std::condition_variable connectCv;
+    std::mutex doneMutex;
+    std::condition_variable doneCv;
+    std::atomic<bool> abortRequested{ false };
+    std::atomic<size_t> disconnectedCount{ 0 };
+    size_t connectedCount = 0;
+    std::vector<std::shared_ptr<SessionContext>> contexts;
+    std::vector<std::shared_ptr<LibNetworks::Core::IOSocketConnector>> connectors;
+    contexts.reserve(sessionCount);
+    connectors.reserve(sessionCount);
+
+    for (size_t i = 0; i < sessionCount; ++i)
+    {
+        auto ctx = std::make_shared<SessionContext>();
+        ctx->SessionIndex = i;
+        contexts.push_back(ctx);
+
+        auto connector = LibNetworks::Core::IOSocketConnector::Create(
+            m_Service,
+            [&, ctx](const shared_ptr<LibNetworks::Core::Socket>& pSocket)
+            -> shared_ptr<LibNetworks::Sessions::INetworkSession>
+            {
+                auto pBenchmarkSession = make_shared<BenchmarkSessionIOCP>(
+                    pSocket,
+                    make_unique<LibCommons::Buffers::CircleBufferQueue>(256 * 1024),
+                    make_unique<LibCommons::Buffers::CircleBufferQueue>(256 * 1024)
+                );
+
+                pBenchmarkSession->SetConnectHandler([&, ctx]()
+                {
+                    ctx->Connected.store(true, std::memory_order_release);
+                    std::lock_guard<mutex> lock(connectMutex);
+                    ++connectedCount;
+                    connectCv.notify_all();
+                });
+
+                pBenchmarkSession->SetDisconnectHandler([&, ctx]()
+                {
+                    ctx->Active.store(false, std::memory_order_release);
+                    if (m_State != BenchmarkState::Completed && !m_StopRequested.load())
+                    {
+                        abortRequested.store(true, std::memory_order_release);
+                        const size_t disconnected = disconnectedCount.fetch_add(1, std::memory_order_acq_rel) + 1;
+                        SetState(BenchmarkState::Failed);
+                        if (disconnected == 1 && m_Callbacks.onError)
+                        {
+                            m_Callbacks.onError("Connection lost during multi-session benchmark");
+                        }
+                        connectCv.notify_all();
+                        doneCv.notify_all();
+                    }
+                });
+
+                ctx->Session = pBenchmarkSession;
+                return static_pointer_cast<LibNetworks::Sessions::INetworkSession>(pBenchmarkSession);
+            },
+            m_Config.serverHost.c_str(),
+            m_Config.serverPort
+        );
+
+        if (!connector)
+        {
+            throw runtime_error("Failed to create benchmark connector");
+        }
+
+        connectors.push_back(connector);
+    }
+
+    {
+        unique_lock<mutex> lock(connectMutex);
+        if (!connectCv.wait_for(lock, chrono::milliseconds(m_Config.timeoutMs),
+            [&] { return connectedCount == sessionCount || abortRequested.load(std::memory_order_acquire); }))
+        {
+            SetState(BenchmarkState::Failed);
+            if (m_Callbacks.onError) m_Callbacks.onError("Connection timeout while opening benchmark sessions");
+            return;
+        }
+
+        if (abortRequested.load(std::memory_order_acquire))
+        {
+            return;
+        }
+    }
+    const uint64_t connectElapsedNs = HighResolutionTimer::NowNs() - connectStartNs;
+
+    std::atomic<size_t> nextWarmup{ 0 };
+    std::atomic<size_t> completedWarmup{ 0 };
+    std::atomic<size_t> nextMeasured{ 0 };
+    std::atomic<size_t> completedMeasured{ 0 };
+    std::atomic<bool> runningMeasured{ false };
+    uint64_t warmupElapsedNs = 0;
+
+    std::mutex sampleMutex;
+
+    auto sendNext = [&](const std::shared_ptr<SessionContext>& ctx, bool measured)
+    {
+        if (!ctx || !ctx->Session || !ctx->Active.load(std::memory_order_acquire) || m_StopRequested.load())
+        {
+            return false;
+        }
+
+        size_t ticket = measured ? nextMeasured.fetch_add(1) : nextWarmup.fetch_add(1);
+        size_t limit = measured ? totalTarget : warmupTarget;
+        if (ticket >= limit)
+        {
+            return false;
+        }
+
+        const size_t payloadIndex = (ticket + ctx->SessionIndex * 131) % payloads.size();
+        const auto& payload = payloads[payloadIndex];
+        const uint64_t sendTime = HighResolutionTimer::NowNs();
+
+        fastport::protocols::benchmark::BenchmarkRequest request;
+        request.mutable_header()->set_request_id(ticket);
+        request.mutable_header()->set_timestamp_ms(
+            chrono::duration_cast<chrono::milliseconds>(
+                chrono::system_clock::now().time_since_epoch()).count());
+        request.set_client_timestamp_ns(sendTime);
+        request.set_sequence(ctx->Sequence.fetch_add(1, std::memory_order_relaxed));
+        request.set_payload(payload);
+
+        ctx->PayloadIndex.store(payloadIndex, std::memory_order_release);
+        ctx->SendTimeNs.store(sendTime, std::memory_order_release);
+        ctx->Session->SendMessage(PACKET_ID_BENCHMARK_REQUEST, request);
+        return true;
+    };
+
+    for (auto& ctx : contexts)
+    {
+        ctx->Session->SetPacketHandler([&, ctx](const LibNetworks::Core::Packet& packet)
+        {
+            if (packet.GetPacketId() != PACKET_ID_BENCHMARK_RESPONSE)
+            {
+                return;
+            }
+
+            fastport::protocols::benchmark::BenchmarkResponse response;
+            if (!packet.ParseMessage(response))
+            {
+                return;
+            }
+
+            if (!runningMeasured.load(std::memory_order_acquire))
+            {
+                const size_t done = completedWarmup.fetch_add(1, std::memory_order_acq_rel) + 1;
+                if (!sendNext(ctx, false) && done >= warmupTarget)
+                {
+                    std::lock_guard<mutex> lock(doneMutex);
+                    doneCv.notify_all();
+                }
+                return;
+            }
+
+            const uint64_t recvTime = HighResolutionTimer::NowNs();
+            const uint64_t sendTime = ctx->SendTimeNs.load(std::memory_order_acquire);
+            const size_t payloadIndex = ctx->PayloadIndex.load(std::memory_order_acquire);
+            {
+                std::lock_guard<mutex> lock(sampleMutex);
+                m_LatencyCollector.AddSample(recvTime - sendTime, payloads[payloadIndex].size());
+            }
+
+            const size_t done = completedMeasured.fetch_add(1, std::memory_order_acq_rel) + 1;
+            if (m_Callbacks.onProgress && (done % 1000 == 0 || done == totalTarget))
+            {
+                m_Callbacks.onProgress(done, totalTarget);
+            }
+
+            if (!sendNext(ctx, true) && done >= totalTarget)
+            {
+                std::lock_guard<mutex> lock(doneMutex);
+                doneCv.notify_all();
+            }
+        });
+    }
+
+    if (warmupTarget > 0)
+    {
+        SetState(BenchmarkState::Warmup);
+        const uint64_t warmupStartNs = HighResolutionTimer::NowNs();
+        for (auto& ctx : contexts)
+        {
+            sendNext(ctx, false);
+        }
+
+        std::unique_lock<mutex> lock(doneMutex);
+        const bool warmupDone = doneCv.wait_for(lock, chrono::milliseconds(m_Config.timeoutMs * (m_Config.warmupIterations + 1)),
+            [&] { return completedWarmup.load(std::memory_order_acquire) >= warmupTarget || m_StopRequested.load() || abortRequested.load(std::memory_order_acquire); });
+        if (!warmupDone || m_StopRequested.load() || abortRequested.load(std::memory_order_acquire))
+        {
+            SetState(BenchmarkState::Failed);
+            if (m_Callbacks.onError)
+            {
+                m_Callbacks.onError(abortRequested.load(std::memory_order_acquire) ? "Warmup aborted after connection loss" : "Warmup timeout");
+            }
+            return;
+        }
+        warmupElapsedNs = HighResolutionTimer::NowNs() - warmupStartNs;
+    }
+
+    SetState(BenchmarkState::Running);
+    runningMeasured.store(true, std::memory_order_release);
+    const uint64_t measuredStartNs = HighResolutionTimer::NowNs();
+
+    for (auto& ctx : contexts)
+    {
+        sendNext(ctx, true);
+    }
+
+    {
+        std::unique_lock<mutex> lock(doneMutex);
+        const bool measuredDone = doneCv.wait_for(lock, chrono::milliseconds(m_Config.timeoutMs * (totalTarget / sessionCount + 2)),
+            [&] { return completedMeasured.load(std::memory_order_acquire) >= totalTarget || m_StopRequested.load() || abortRequested.load(std::memory_order_acquire); });
+        if (!measuredDone || m_StopRequested.load() || abortRequested.load(std::memory_order_acquire))
+        {
+            SetState(BenchmarkState::Failed);
+            if (m_Callbacks.onError)
+            {
+                m_Callbacks.onError(abortRequested.load(std::memory_order_acquire) ? "Measured run aborted after connection loss" : "Measured run timeout");
+            }
+            return;
+        }
+    }
+
+    const uint64_t measuredElapsedNs = HighResolutionTimer::NowNs() - measuredStartNs;
+    m_Results = m_LatencyCollector.Calculate(m_Config.testName, m_Config.payloadMaxSize == 0 ? m_Config.payloadSize : m_Config.payloadMaxSize);
+    m_Results.totalElapsedNs = measuredElapsedNs;
+    m_Results.debugProfileEnabled = true;
+    m_Results.requestedSessions = sessionCount;
+    m_Results.connectedSessions = connectedCount;
+    m_Results.connectionLosses = disconnectedCount.load(std::memory_order_acquire);
+    m_Results.warmupRequests = warmupTarget;
+    m_Results.warmupResponses = completedWarmup.load(std::memory_order_acquire);
+    m_Results.measuredRequests = totalTarget;
+    m_Results.measuredResponses = completedMeasured.load(std::memory_order_acquire);
+    m_Results.payloadMinBytes = m_Config.payloadMinSize == 0 ? m_Config.payloadSize : (std::min)(m_Config.payloadMinSize, m_Config.payloadMaxSize == 0 ? m_Config.payloadMinSize : m_Config.payloadMaxSize);
+    m_Results.payloadMaxBytes = m_Config.payloadMaxSize == 0 ? m_Results.payloadMinBytes : (std::max)(m_Config.payloadMinSize == 0 ? m_Config.payloadSize : m_Config.payloadMinSize, m_Config.payloadMaxSize);
+    m_Results.payloadPoolSize = payloads.size();
+    m_Results.connectElapsedNs = connectElapsedNs;
+    m_Results.warmupElapsedNs = warmupElapsedNs;
+    m_Results.measuredElapsedNs = measuredElapsedNs;
+    const double elapsedSec = HighResolutionTimer::ToSeconds(measuredElapsedNs);
+    if (elapsedSec > 0.0)
+    {
+        m_Results.packetsPerSecond = static_cast<double>(m_Results.iterations) / elapsedSec;
+        m_Results.megabytesPerSecond = static_cast<double>(m_Results.totalBytes) / (1024.0 * 1024.0) / elapsedSec;
+    }
+    SetState(BenchmarkState::Completed);
+    if (m_Callbacks.onCompleted) m_Callbacks.onCompleted(m_Results);
+
+    for (auto& ctx : contexts)
+    {
+        DisconnectAndWaitDrain(ctx->Session);
     }
 }
 

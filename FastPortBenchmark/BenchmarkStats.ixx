@@ -55,6 +55,22 @@ export struct BenchmarkStats
     uint64_t totalBytes = 0;
     uint64_t totalElapsedNs = 0;
 
+    // Debug profile
+    bool debugProfileEnabled = false;
+    size_t requestedSessions = 0;
+    size_t connectedSessions = 0;
+    size_t connectionLosses = 0;
+    size_t warmupRequests = 0;
+    size_t warmupResponses = 0;
+    size_t measuredRequests = 0;
+    size_t measuredResponses = 0;
+    size_t payloadMinBytes = 0;
+    size_t payloadMaxBytes = 0;
+    size_t payloadPoolSize = 0;
+    uint64_t connectElapsedNs = 0;
+    uint64_t warmupElapsedNs = 0;
+    uint64_t measuredElapsedNs = 0;
+
     std::string ToString() const
     {
         std::ostringstream oss;
@@ -81,6 +97,28 @@ export struct BenchmarkStats
         oss << "   MB/sec      : " << megabytesPerSecond << "\n";
         oss << "   Total Bytes : " << totalBytes << "\n";
         oss << "   Elapsed     : " << HighResolutionTimer::ToMilliseconds(totalElapsedNs) << " ms\n";
+        if (debugProfileEnabled)
+        {
+            const double avgPayloadBytes = iterations > 0
+                ? static_cast<double>(totalBytes) / static_cast<double>(iterations)
+                : 0.0;
+
+            oss << "--------------------------------------\n";
+            oss << " Debug Profile:\n";
+            oss << "   Sessions    : " << connectedSessions << "/" << requestedSessions << " connected";
+            if (connectionLosses > 0)
+            {
+                oss << ", " << connectionLosses << " lost";
+            }
+            oss << "\n";
+            oss << "   Connect     : " << HighResolutionTimer::ToMilliseconds(connectElapsedNs) << " ms\n";
+            oss << "   Warmup      : " << warmupResponses << "/" << warmupRequests
+                << " responses, " << HighResolutionTimer::ToMilliseconds(warmupElapsedNs) << " ms\n";
+            oss << "   Measured    : " << measuredResponses << "/" << measuredRequests
+                << " responses, " << HighResolutionTimer::ToMilliseconds(measuredElapsedNs) << " ms\n";
+            oss << "   Payload     : " << payloadMinBytes << "-" << payloadMaxBytes
+                << " bytes, avg " << avgPayloadBytes << ", pool " << payloadPoolSize << "\n";
+        }
         oss << "======================================\n";
         return oss.str();
     }
@@ -101,7 +139,20 @@ export struct BenchmarkStats
             << p99LatencyNs << ","
             << stdDevNs << ","
             << packetsPerSecond << ","
-            << megabytesPerSecond;
+            << megabytesPerSecond << ","
+            << requestedSessions << ","
+            << connectedSessions << ","
+            << connectionLosses << ","
+            << warmupRequests << ","
+            << warmupResponses << ","
+            << measuredRequests << ","
+            << measuredResponses << ","
+            << payloadMinBytes << ","
+            << payloadMaxBytes << ","
+            << payloadPoolSize << ","
+            << connectElapsedNs << ","
+            << warmupElapsedNs << ","
+            << measuredElapsedNs;
         return oss.str();
     }
 
@@ -109,7 +160,10 @@ export struct BenchmarkStats
     {
         return "test_name,iterations,payload_size,avg_latency_ns,min_latency_ns,max_latency_ns,"
                "p50_latency_ns,p90_latency_ns,p95_latency_ns,p99_latency_ns,stddev_ns,"
-               "packets_per_sec,mb_per_sec";
+               "packets_per_sec,mb_per_sec,requested_sessions,connected_sessions,connection_losses,"
+               "warmup_requests,warmup_responses,measured_requests,measured_responses,"
+               "payload_min_bytes,payload_max_bytes,payload_pool_size,connect_elapsed_ns,"
+               "warmup_elapsed_ns,measured_elapsed_ns";
     }
 };
 
@@ -124,12 +178,19 @@ public:
 
     void AddSample(uint64_t latencyNs)
     {
+        AddSample(latencyNs, 0);
+    }
+
+    void AddSample(uint64_t latencyNs, size_t bytes)
+    {
         m_Samples.push_back(latencyNs);
+        m_TotalBytes += static_cast<uint64_t>(bytes);
     }
 
     void Clear()
     {
         m_Samples.clear();
+        m_TotalBytes = 0;
     }
 
     size_t Count() const { return m_Samples.size(); }
@@ -180,7 +241,9 @@ public:
 
         // Throughput 계산
         stats.totalElapsedNs = static_cast<uint64_t>(sum);
-        stats.totalBytes = static_cast<uint64_t>(stats.iterations) * static_cast<uint64_t>(payloadSize);
+        stats.totalBytes = m_TotalBytes > 0
+            ? m_TotalBytes
+            : static_cast<uint64_t>(stats.iterations) * static_cast<uint64_t>(payloadSize);
 
         double elapsedSec = HighResolutionTimer::ToSeconds(stats.totalElapsedNs);
         if (elapsedSec > 0.0)
@@ -213,6 +276,7 @@ private:
     }
 
     std::vector<uint64_t> m_Samples;
+    uint64_t m_TotalBytes = 0;
 };
 
 } // namespace FastPortBenchmark

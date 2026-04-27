@@ -51,10 +51,16 @@ struct CommandLineArgs
     size_t iterations = 10000;
     size_t warmup = 100;
     size_t payloadSize = 64;
+    size_t payloadMinSize = 0;
+    size_t payloadMaxSize = 0;
+    size_t payloadPoolSize = 1024;
+    size_t sessionCount = 1;
+    uint32_t ioThreadCount = 2;
     std::string outputFile;
     bool verbose = false;
     bool help = false;
     bool useRio = false;
+    bool pauseOnExit = false;
 
     static CommandLineArgs Parse(int argc, char* argv[])
     {
@@ -84,6 +90,26 @@ struct CommandLineArgs
             {
                 args.payloadSize = std::stoull(argv[++i]);
             }
+            else if (arg == "--payload-min" && i + 1 < argc)
+            {
+                args.payloadMinSize = std::stoull(argv[++i]);
+            }
+            else if (arg == "--payload-max" && i + 1 < argc)
+            {
+                args.payloadMaxSize = std::stoull(argv[++i]);
+            }
+            else if (arg == "--payload-pool" && i + 1 < argc)
+            {
+                args.payloadPoolSize = std::stoull(argv[++i]);
+            }
+            else if (arg == "--sessions" && i + 1 < argc)
+            {
+                args.sessionCount = std::stoull(argv[++i]);
+            }
+            else if (arg == "--io-threads" && i + 1 < argc)
+            {
+                args.ioThreadCount = static_cast<uint32_t>(std::stoul(argv[++i]));
+            }
             else if (arg == "--output" && i + 1 < argc)
             {
                 args.outputFile = argv[++i];
@@ -96,6 +122,10 @@ struct CommandLineArgs
             else if (arg == "--verbose")
             {
                 args.verbose = true;
+            }
+            else if (arg == "--pause-on-exit")
+            {
+                args.pauseOnExit = true;
             }
             else if (arg == "--help" || arg == "-h")
             {
@@ -120,12 +150,19 @@ Options:
   --iterations <n>    Number of iterations (default: 10000)
   --warmup <n>        Warmup iterations (default: 100)
   --payload <bytes>   Payload size in bytes (default: 64)
+  --payload-min <n>   Random payload minimum bytes
+  --payload-max <n>   Random payload maximum bytes
+  --payload-pool <n>  Pre-generated payload count (default: 1024)
+  --sessions <n>      Concurrent TCP sessions (default: 1)
+  --io-threads <n>    IO service worker threads (default: 2)
   --output <file>     Output CSV file path (timestamp auto-added)
   --verbose           Verbose output
+  --pause-on-exit     Wait for key before exit in Debug builds
   --help, -h          Show this help
 
 Examples:
   FastPortBenchmark.exe --mode rio --iterations 10000
+  FastPortBenchmark.exe --sessions 1000 --payload-min 4096 --payload-max 16384 --iterations 100000
   FastPortBenchmark.exe --host 192.168.1.100 --port 9001 --output results.csv
 )";
     }
@@ -167,9 +204,10 @@ static void SaveResultsToCsv(const std::string& baseFilename, const std::vector<
 }
 
 // 디버그 모드에서 키 입력 대기
-static void WaitForKeyInDebugMode()
+static void WaitForKeyInDebugMode(bool pauseOnExit)
 {
 #ifdef _DEBUG
+    if (!pauseOnExit) return;
     std::cout << "\nPress any key to exit..." << std::endl;
     std::cin.get();
 #endif
@@ -205,7 +243,18 @@ int main(int argc, char* argv[])
     std::cout << " Server     : " << args.host << ":" << args.port << "\n";
     std::cout << " Iterations : " << args.iterations << "\n";
     std::cout << " Warmup     : " << args.warmup << "\n";
-    std::cout << " Payload    : " << args.payloadSize << " bytes\n";
+    std::cout << " Sessions   : " << args.sessionCount << "\n";
+    std::cout << " IO Threads : " << args.ioThreadCount << "\n";
+    if (args.payloadMinSize > 0 || args.payloadMaxSize > 0)
+    {
+        const size_t minPayload = args.payloadMinSize == 0 ? args.payloadSize : args.payloadMinSize;
+        const size_t maxPayload = args.payloadMaxSize == 0 ? minPayload : args.payloadMaxSize;
+        std::cout << " Payload    : " << minPayload << "-" << maxPayload << " bytes, pool " << args.payloadPoolSize << "\n";
+    }
+    else
+    {
+        std::cout << " Payload    : " << args.payloadSize << " bytes\n";
+    }
     std::cout << "======================================\n\n";
 
     // 벤치마크 설정
@@ -216,6 +265,11 @@ int main(int argc, char* argv[])
     config.iterations = args.iterations;
     config.warmupIterations = args.warmup;
     config.payloadSize = args.payloadSize;
+    config.payloadMinSize = args.payloadMinSize;
+    config.payloadMaxSize = args.payloadMaxSize;
+    config.payloadPoolSize = args.payloadPoolSize;
+    config.sessionCount = args.sessionCount;
+    config.ioThreadCount = args.ioThreadCount;
     config.verbose = args.verbose;
     config.useRio = args.useRio;
 
@@ -295,7 +349,7 @@ int main(int argc, char* argv[])
         SaveResultsToCsv(args.outputFile, allResults);
     }
 
-    WaitForKeyInDebugMode();
+    WaitForKeyInDebugMode(args.pauseOnExit);
 
     return completed ? 0 : 1;
 }

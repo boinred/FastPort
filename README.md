@@ -2,125 +2,196 @@
 
 [English](./README.md) | [한국어](./README.ko.md)
 
-**High-Performance Asynchronous Network Framework based on Windows IOCP & RIO**
+**High-performance asynchronous networking framework for Windows IOCP and RIO**
 
-A scalable network server/client library implemented using C++20 modules, supporting both traditional IOCP and the high-performance Registered I/O (RIO) extensions.
+FastPort is a C++20 modules-based networking project focused on IOCP server performance, benchmark reproducibility, and future RIO support. The current optimization baseline is the IOCP Release Windows service workload: 1000 real TCP sessions with 4K-16K random binary payloads.
 
 ---
 
-## 🎯 Project Overview
+## Project Overview
 
 | Item | Description |
 |------|-------------|
-| **Goal** | Design and implementation of a high-performance networking framework supporting IOCP and RIO |
-| **Type** | Personal Project |
-| **Dev Environment** | Windows, Visual Studio 2022 (v145+), C++20 |
+| Goal | Build and optimize a high-performance Windows networking framework |
+| Primary engine | IOCP |
+| Secondary engine | RIO, maintained in separate RIO projects |
+| Language | C++20 modules (`.ixx`) |
+| Platform | Windows x64 |
+| Toolchain | Visual Studio / MSBuild |
 
 ---
 
-## 🛠 Tech Stack
+## Tech Stack
 
 | Category | Technology |
 |----------|------------|
-| **Language** | C++20 (Modules `.ixx`) |
-| **Async I/O** | Windows **IOCP** & **RIO (Registered I/O)** |
-| **Network** | Winsock2, AcceptEx, ConnectEx, RIO Extension |
-| **Serialization** | Protocol Buffers (protobuf) |
-| **Logging** | spdlog |
-| **Synchronization** | SRWLock, std::mutex, atomic |
-| **Package Management** | vcpkg |
+| Async I/O | Windows IOCP, AcceptEx, ConnectEx |
+| RIO | Registered I/O projects under `LibNetworksRIO` and `FastPortServerRIO` |
+| Serialization | Protocol Buffers |
+| Logging | `LibCommons::Logger` wrapper over spdlog |
+| CLI | cxxopts |
+| Package management | vcpkg |
 
 ---
 
-## ✨ Key Implementations
+## Key Implementations
 
-### 1. IOCP Engine (Default Mode)
-- **Asynchronous I/O**: Efficient worker thread pool management based on hardware concurrency.
-- **Async Accept/Connect**: Uses `AcceptEx` and `ConnectEx` for fully non-blocking connection management.
-- **Zero-Byte Recv**: Minimizes kernel page locking resources for idle sessions.
-- **1-Outstanding Send**: Ensures sequential transmission and saves kernel resources.
-- **Scatter-Gather I/O**: Zero-copy data transfer using `WSABUF` arrays.
+### IOCP Engine
 
-### 2. RIO Engine (High-Performance Mode)
-- **Direct Buffer Access**: Minimizes overhead by using pre-registered memory chunks via `RioBufferManager`.
-- **Large Packet Streaming**: Supports seamless transfer of packets exceeding the RIO buffer size (e.g., 1MB packet through 64KB buffer) via a specialized **Pending Send Queue**.
-- **Fast-Path Optimization**: Bypasses queueing for small packets when buffer space is available to minimize latency.
+- Asynchronous accept/connect using `AcceptEx` and `ConnectEx`.
+- Worker thread processing through IOCP completion ports.
+- Zero-byte receive support for idle session efficiency.
+- Sequential one-outstanding-send behavior per session.
+- Scatter/gather send path with `WSABUF`.
+- Session idle checking and server status/admin support.
 
-### 3. Reliability & Safety
-- **Backpressure**: Monitors pending data volume and enforces a safety limit (default 10MB) to prevent memory exhaustion (OOM).
-- **Delayed Consume**: Data is only removed from the send buffer after actual I/O completion is confirmed.
+### Benchmarking
 
----
+- Real multi-session benchmark support through `FastPortBenchmark`.
+- Random payload ranges with pre-generated payload pools.
+- Debug profile fields for connection count, warmup responses, measured responses, elapsed times, and payload range.
+- CSV output for reproducible benchmark evidence.
 
-## 🏗 Architecture
+### Release Service Mode
 
-FastPort provides a dual-engine architecture where the network mode can be switched at runtime.
+`FastPortServer` runs as a console process in Debug builds and as a Windows service in Release builds. The Release service name is:
 
-```mermaid
-graph TB
-    subgraph Application["Application Layer"]
-        Server[FastPortServer]
-        Client[FastPortClient]
-        Benchmark[FastPortBenchmark]
-    end
-
-    subgraph Service["Service Layer (Hybrid)"]
-        IOService[IOService<br/>IOCP Engine]
-        RIOService[RIOService<br/>RIO Engine]
-    end
-
-    subgraph Session["Session Layer"]
-        IOSession[IOSession]
-        RIOSession[RIOSession]
-    end
-    
-    Server --> Service
-    Client --> Service
-    Service --> Session
+```text
+FastPortServerIOCP
 ```
 
 ---
 
-## 🔧 Build and Run
+## Build
 
-### Requirements
-- Windows 10 or higher
-- Visual Studio 2022 or higher
-- vcpkg: `vcpkg install spdlog protobuf grpc cxxopts`
+From a developer PowerShell:
 
-### Running the Server
-
-**1. Default (IOCP) Mode:**
-```bash
-./FastPortServer.exe
+```powershell
+& 'C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\amd64\MSBuild.exe' `
+  '.\FastPort.slnx' `
+  '/t:FastPortServer;FastPortBenchmark' `
+  '/p:Configuration=Release;Platform=x64' `
+  /m /nologo /v:minimal
 ```
 
-**2. RIO Mode (High Performance):**
-```bash
-./FastPortServer.exe --rio
+Debug build:
+
+```powershell
+& 'C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\amd64\MSBuild.exe' `
+  '.\FastPort.slnx' `
+  '/t:FastPortServer;FastPortBenchmark' `
+  '/p:Configuration=Debug;Platform=x64' `
+  /m /nologo /v:minimal
 ```
 
-### Running the Benchmark
+Build outputs are written under:
 
-```bash
-# Measure IOCP performance (Default)
-./FastPortBenchmark.exe --mode iocp
-
-# Measure RIO performance
-./FastPortBenchmark.exe --mode rio
+```text
+_Builds\x64\Debug
+_Builds\x64\Release
 ```
 
 ---
 
-## 🚀 Future Roadmap
+## Run the IOCP Server
 
-- [x] **RIO (Registered I/O) Support**: Core integration completed.
-- [ ] **Advanced Session Manager**: Optimized session map partitioning.
-- [ ] **Object Pooling**: Reduce GC overhead by reusing objects.
-- [ ] **TLS/SSL Support**: Integration of secure transmission layer.
+### Debug Console Mode
+
+```powershell
+.\_Builds\x64\Debug\FastPortServer.exe
+```
+
+### Release Service Mode
+
+Run from an elevated PowerShell:
+
+```powershell
+.\_Builds\x64\Release\FastPortServer.exe install
+sc.exe start FastPortServerIOCP
+sc.exe query FastPortServerIOCP
+```
+
+Stop or remove the service:
+
+```powershell
+sc.exe stop FastPortServerIOCP
+.\_Builds\x64\Release\FastPortServer.exe uninstall
+```
+
+The IOCP server listens on port `6628`.
 
 ---
 
-## 📝 License
+## Run the Current Baseline Benchmark
+
+The current optimization baseline is:
+
+- Release server running as `FastPortServerIOCP`
+- 1000 real TCP sessions
+- 4096-16384 byte random binary payload
+- 100000 measured request/response cycles
+- 10 warmup request/response cycles per session
+- 8 benchmark IO threads
+
+```powershell
+.\_Builds\x64\Release\FastPortBenchmark.exe `
+  --port 6628 `
+  --sessions 1000 `
+  --payload-min 4096 `
+  --payload-max 16384 `
+  --iterations 100000 `
+  --warmup 10 `
+  --io-threads 8 `
+  --output docs\evidence\iocp_release_1000.csv
+```
+
+Official benchmark documents should use 10 runs per scenario. Single-run measurements are only for smoke checks or debugging.
+
+---
+
+## Current Baseline Result
+
+Document: [docs/benchmark-results-05-iocp-release-1000-sessions.md](docs/benchmark-results-05-iocp-release-1000-sessions.md)
+
+| Metric | Value |
+|--------|------:|
+| Sessions | 1000 / 1000 connected |
+| Payload | 4096-16384 bytes, avg 10346.37 bytes |
+| Iterations | 100000 |
+| Average RTT | 22.5596 ms |
+| P50 RTT | 22.6236 ms |
+| P99 RTT | 33.5659 ms |
+| Throughput | 43526.33 packets/sec |
+| Payload throughput | 429.48 MB/sec |
+| Connection losses | 0 |
+
+Future optimization results should continue as `benchmark-results-06-*`, `benchmark-results-07-*`, and so on, using this workload as the baseline.
+
+---
+
+## Documentation
+
+- [Build Guide](docs/BUILD_GUIDE.md)
+- [Benchmark Guide](docs/BENCHMARK_GUIDE.md)
+- [IOCP Architecture](docs/ARCHITECTURE_IOCP.md)
+- [RIO Architecture](docs/ARCHITECTURE_RIO.md)
+- [Packet Protocol](docs/PACKET_PROTOCOL.md)
+- [Project Structure](docs/PROJECT_STRUCTURE.md)
+
+---
+
+## Roadmap
+
+- [x] IOCP service-mode benchmark baseline.
+- [x] Multi-session benchmark with random payload pool.
+- [ ] 10-run aggregate benchmark baseline.
+- [ ] Configurable in-flight depth per session.
+- [ ] Zero-copy receive path.
+- [ ] Object pool integration for hot packet/session paths.
+- [ ] Graceful shutdown and keep-alive API hardening.
+
+---
+
+## License
 
 MIT License

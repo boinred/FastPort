@@ -4,6 +4,11 @@
 
 FastPort 네트워크 성능 벤치마크 도구 사용 가이드입니다.
 
+현재 최적화 기준선은 IOCP Release Windows 서비스 모드에서 1000개의 실제 TCP 세션과
+4096-16384 bytes 랜덤 binary payload를 사용하는 workload입니다.
+
+기준선 문서: [benchmark-results-05-iocp-release-1000-sessions.md](../benchmark-results-05-iocp-release-1000-sessions.md)
+
 ---
 
 ## 📊 개요
@@ -33,6 +38,17 @@ FastPort 네트워크 성능 벤치마크 도구 사용 가이드입니다.
 .\FastPortBenchmark.exe
 ```
 
+### Release 서비스 모드 서버 실행
+
+관리자 PowerShell에서 실행합니다.
+
+```powershell
+.\_Builds\x64\Release\FastPortServer.exe install
+sc.exe start FastPortServerIOCP
+sc.exe query FastPortServerIOCP
+netstat -ano | Select-String ':6628'
+```
+
 ### 명령줄 옵션
 
 | 옵션 | 설명 | 기본값 |
@@ -43,8 +59,14 @@ FastPort 네트워크 성능 벤치마크 도구 사용 가이드입니다.
 | `--iterations <n>` | 반복 횟수 | 10000 |
 | `--warmup <n>` | 워밍업 횟수 | 100 |
 | `--payload <bytes>` | 페이로드 크기 | 64 |
+| `--payload-min <bytes>` | 랜덤 페이로드 최소 크기 | - |
+| `--payload-max <bytes>` | 랜덤 페이로드 최대 크기 | - |
+| `--payload-pool <n>` | 사전 생성 payload 개수 | 1024 |
+| `--sessions <n>` | 동시 TCP 세션 수 | 1 |
+| `--io-threads <n>` | 클라이언트 IOCP 워커 스레드 수 | 2 |
 | `--output <file>` | CSV 결과 파일 | - |
 | `--verbose` | 상세 출력 | false |
+| `--pause-on-exit` | Debug 빌드 종료 전 키 입력 대기 | false |
 | `--help` | 도움말 | - |
 
 ### 예시
@@ -58,6 +80,9 @@ FastPortBenchmark.exe --mode rio
 
 # 반복 횟수와 페이로드 크기 지정
 FastPortBenchmark.exe --iterations 1000 --payload 256
+
+# IOCP 다중 세션 처리량 테스트
+FastPortBenchmark.exe --sessions 1000 --payload-min 4096 --payload-max 16384 --iterations 100000 --warmup 10 --io-threads 8
 
 # 원격 서버 테스트 + CSV 저장
 FastPortBenchmark.exe --host 192.168.1.100 --port 9001 --output results.csv
@@ -96,6 +121,16 @@ benchmark.csv → benchmark_2024-01-15-14-30.csv
 | `stddev_ns` | 표준 편차 (ns) |
 | `packets_per_sec` | 초당 패킷 수 |
 | `mb_per_sec` | 초당 MB |
+| `requested_sessions` | 요청한 세션 수 |
+| `connected_sessions` | 실제 연결 완료된 세션 수 |
+| `connection_losses` | 측정 중 끊긴 세션 수 |
+| `warmup_requests` / `warmup_responses` | 워밍업 요청/응답 수 |
+| `measured_requests` / `measured_responses` | 측정 요청/응답 수 |
+| `payload_min_bytes` / `payload_max_bytes` | payload 크기 범위 |
+| `payload_pool_size` | 사전 생성 payload 개수 |
+| `connect_elapsed_ns` | 전체 연결 완료까지 걸린 시간 |
+| `warmup_elapsed_ns` | 워밍업 구간 시간 |
+| `measured_elapsed_ns` | 측정 구간 wall-clock 시간 |
 
 ---
 
@@ -185,6 +220,37 @@ FastPortBenchmark.exe --mode rio --output rio_result.csv
 # 결과 비교 (Excel 또는 스크립트)
 ```
 
+### 5. 다중 세션 IOCP 부하 테스트
+
+```powershell
+FastPortBenchmark.exe --mode iocp --sessions 1000 --payload-min 4096 --payload-max 16384 --payload-pool 4096 --iterations 100000 --warmup 10 --io-threads 8 --output iocp_load.csv
+```
+
+실제 TCP 연결 1000개를 만들고, 각 세션은 요청 1개를 보낸 뒤 응답을 받을 때마다 다음 요청을 보냅니다.
+측정 중 payload 문자열은 새로 만들지 않고 시작 시 pool로 사전 생성합니다. 따라서 측정 구간에서는 payload 선택,
+protobuf 직렬화, IOCP 송수신, 서버 echo 처리 비용이 주로 반영됩니다.
+
+다중 세션 모드의 `iterations`는 전체 측정 응답 수입니다. `warmup`은 세션당 워밍업 횟수로 적용됩니다.
+예를 들어 `--sessions 1000 --warmup 10`은 총 10,000개 워밍업 request/response를 통계 제외 구간으로 보냅니다.
+
+서버의 IOCP 기본 프로필은 1000 세션 / 4K-16K echo 부하를 받을 수 있도록 세션당 recv/send 버퍼를 64KB로,
+listen backlog를 1024로, 초기 AcceptEx posting 수를 256으로 설정합니다. Idle timeout은 대량 연결 warmup 중
+오탐을 줄이기 위해 60초로 설정합니다.
+
+---
+
+## 🧪 공식 측정 정책
+
+빠른 확인과 공식 성능 문서는 기준을 나눕니다.
+
+| 목적 | 실행 횟수 | 용도 |
+|------|----------:|------|
+| Smoke check | 1회 | benchmark가 정상 완료되는지 확인 |
+| 공식 benchmark | 10회 | 최적화 전후 성능 비교 문서화 |
+
+공식 결과는 `Average RTT`, `P50`, `P99`, `Packets/sec`, `MB/sec`에 대해 best, worst, average, median,
+standard deviation을 함께 기록합니다. connection loss 또는 response 누락이 있는 run은 버리지 않고 실패 run으로 기록합니다.
+
 ---
 
 ## 🔧 프로토콜 명세
@@ -249,6 +315,7 @@ message BenchmarkResponse {
 
 ## 🔗 관련 문서
 
+- [현재 벤치마크 기준선](../benchmark-results-05-iocp-release-1000-sessions.md)
 - [IOCP 아키텍처](../ARCHITECTURE_IOCP.md)
 - [RIO 아키텍처](../ARCHITECTURE_RIO.md)
 - [패킷 프로토콜](../PACKET_PROTOCOL.md)

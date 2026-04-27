@@ -33,7 +33,10 @@ public:
 private:
     void SetState(BenchmarkState state);
     void RunBenchmark();
+    void RunSequentialBenchmark();
+    void RunMultiSessionBenchmark();
     void DisconnectAndWaitDrain(const std::shared_ptr<IBenchmarkSession>& pSession);
+    std::vector<std::string> BuildPayloadPool() const;
 
 private:
     BenchmarkConfig m_Config;

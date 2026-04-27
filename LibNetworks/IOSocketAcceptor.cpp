@@ -22,8 +22,8 @@ std::shared_ptr<LibNetworks::Core::IOSocketAcceptor> IOSocketAcceptor::Create(
     OnDoFuncCreateSession pOnDoFuncCreateSession,
     const unsigned short listenPort,
     const unsigned long maxConnectionCount,
-    const unsigned char threadCount,
-    const unsigned char beginAcceptCount /*= 100*/)
+    const unsigned int threadCount,
+    const unsigned int beginAcceptCount /*= 100*/)
 {
     auto pAcceptor = std::make_shared<IOSocketAcceptor>(listenSocketMode, rfListenerSocket, pOnDoFuncCreateSession);
     if (!pAcceptor->Start(listenPort, maxConnectionCount, threadCount, beginAcceptCount))
@@ -139,7 +139,7 @@ void IOSocketAcceptor::OnIOCompleted(bool bSuccess, DWORD bytesTransferred, OVER
 
 //------------------------------------------------------------------------ 
 
-bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned char threadCount, const unsigned char beginAcceptCount)
+bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned long maxConnectionCount, const unsigned int threadCount, const unsigned int beginAcceptCount)
 {
     auto& logger = LibCommons::Logger::GetInstance();
 
@@ -177,7 +177,7 @@ bool IOSocketAcceptor::Start(const unsigned short listenPort, const unsigned lon
     m_bExecuted = true;
 
     // 3. 초기 AcceptEx 요청 시작
-    for (int i = 0; i < beginAcceptCount; i++)
+    for (unsigned int i = 0; i < beginAcceptCount; i++)
     {
         if (!BeginAcceptEx())
         {

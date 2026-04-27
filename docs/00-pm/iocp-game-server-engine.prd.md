@@ -314,7 +314,7 @@ FastPort IOCP Game Server Engine v1 은 Windows IOCP 기반의 TCP 게임 서버
 
 **Non-Functional**
 - NFR-1: Release x64 기준, 로컬 loopback 64B echo: Peak ≥ 30K PPS, P50 ≤ 30µs, P99(stable) ≤ 80µs.
-- NFR-2: FastPortBenchmark 로 재현 가능한 환경 정보(`docs/benchmark-results-04-*.md`) 기록 의무화.
+- NFR-2: FastPortBenchmark 로 재현 가능한 환경 정보(`docs/benchmark-results-05-iocp-release-1000-sessions.md` 이후) 기록 의무화.
 - NFR-3: Stress reproducer(IOSession lifetime) 1,000,000 회 × 2 run = 0 crash / 0 asan(MSVC /RTC).
 - NFR-4: `/std:c++20` 고정, `stdcpplatest` 승격 금지 (C1001 ICE 이력).
 - NFR-5: 모든 로그는 `LibCommons::Logger`, spdlog 직접 호출 금지, Shutdown 순서 준수(TimerQueue → Logger).
@@ -348,7 +348,7 @@ FastPort IOCP Game Server Engine v1 은 Windows IOCP 기반의 TCP 게임 서버
 | M1: Lifetime race patch + stress green | +2주 | IOSession race 수정 반영 |
 | M2: Zero-Copy Recv + Object Pool | +3주 | PacketFramer span, Packet Pool |
 | M3: Keep-Alive API + Graceful Shutdown | +2주 | FR-4, FR-5 |
-| M4: Benchmark 재현 스크립트 + 결과 md | +1주 | `benchmark-results-04-zero-copy-recv.md` |
+| M4: Benchmark 재현 스크립트 + 결과 md | +1주 | `benchmark-results-06-zero-copy-recv.md` |
 | M5: 샘플(Echo, Chat) + 문서 v2 | +2주 | 한국어 가이드, README 리라이트 |
 | M6: 공식 v1.0.0 릴리스 | +1주 | Git tag, 블로그 1편 공개 |
 
@@ -417,4 +417,3 @@ PM Agent Team 프레임워크는 [pm-skills](https://github.com/phuryn/pm-skills
 
 - **다음 단계**: `/pdca plan iocp-game-server-engine` — 이 PRD 가 Plan 문서의 컨텍스트로 자동 참조됨.
 - **권장**: IOSession lifetime race 수정(`iosession-lifetime-race`)이 선행 병렬로 진행 중이므로, v1 Plan 은 그 결과를 merge 한 시점 기준으로 M2(Zero-Copy Recv + Object Pool) 부터 범위화.
-
