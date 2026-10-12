@@ -11,11 +11,11 @@ module;
 #include <mutex>
 #include <chrono>
 #include <functional>
-#include "Protocols/Admin.pb.h"
 
 export module test_client.app;
 
 import test_client.metrics_collector;
+import test_client.test_session;
 import test_client.test_runner;
 import test_client.ab_compare;
 
@@ -38,13 +38,13 @@ public:
 
         // Design Ref: server-status §5.2 — Admin 응답 수신 콜백 등록.
         m_Runner.SetAdminSummaryCallback(
-            [this](const ::fastport::protocols::admin::AdminStatusSummaryResponse& res) {
+            [this](const AdminSummarySnapshot& res) {
                 std::lock_guard lock(m_AdminMutex);
                 m_AdminSummary = res;
                 m_bAdminSummaryValid = true;
             });
         m_Runner.SetAdminSessionListCallback(
-            [this](const ::fastport::protocols::admin::AdminSessionListResponse& res) {
+            [this](const AdminSessionListSnapshot& res) {
                 std::lock_guard lock(m_AdminMutex);
                 m_AdminSessionList = res;
                 m_bAdminSessionListValid = true;
@@ -443,7 +443,7 @@ private:
             return;
         }
 
-        ::fastport::protocols::admin::AdminStatusSummaryResponse summary;
+        AdminSummarySnapshot summary;
         bool haveSummary = false;
         {
             std::lock_guard lock(m_AdminMutex);
@@ -463,23 +463,23 @@ private:
         {
             // Summary 그리드
             const char* modeStr = "Unknown";
-            switch (summary.server_mode())
+            switch (summary.ServerMode)
             {
-            case ::fastport::protocols::admin::SERVER_MODE_IOCP: modeStr = "IOCP"; break;
-            case ::fastport::protocols::admin::SERVER_MODE_RIO:  modeStr = "RIO";  break;
+            case AdminServerMode::IOCP: modeStr = "IOCP"; break;
+            case AdminServerMode::RIO:  modeStr = "RIO";  break;
             default: break;
             }
             ImGui::Text("Server Mode       : %s", modeStr);
-            ImGui::Text("Uptime            : %s",  FormatUptime(summary.server_uptime_ms()).c_str());
-            ImGui::Text("Active Sessions   : %u", summary.active_session_count());
-            ImGui::Text("Total RX          : %s", FormatBytes(summary.total_rx_bytes()).c_str());
-            ImGui::Text("Total TX          : %s", FormatBytes(summary.total_tx_bytes()).c_str());
+            ImGui::Text("Uptime            : %s",  FormatUptime(summary.ServerUptimeMs).c_str());
+            ImGui::Text("Active Sessions   : %u", summary.ActiveSessionCount);
+            ImGui::Text("Total RX          : %s", FormatBytes(summary.TotalRxBytes).c_str());
+            ImGui::Text("Total TX          : %s", FormatBytes(summary.TotalTxBytes).c_str());
             ImGui::Text("Idle Disconnects  : %llu",
-                static_cast<unsigned long long>(summary.idle_disconnect_count()));
-            ImGui::Text("Process Memory    : %s", FormatBytes(summary.process_memory_bytes()).c_str());
-            ImGui::Text("Process CPU       : %.2f %%", summary.process_cpu_percent());
+                static_cast<unsigned long long>(summary.IdleDisconnectCount));
+            ImGui::Text("Process Memory    : %s", FormatBytes(summary.ProcessMemoryBytes).c_str());
+            ImGui::Text("Process CPU       : %.2f %%", summary.ProcessCpuPercent);
             ImGui::Text("Server Timestamp  : %llu ms",
-                static_cast<unsigned long long>(summary.server_timestamp_ms()));
+                static_cast<unsigned long long>(summary.ServerTimestampMs));
         }
 
         ImGui::Spacing(); ImGui::Spacing();
@@ -499,7 +499,7 @@ private:
                 static_cast<uint32_t>(m_AdminLimit));
         }
 
-        ::fastport::protocols::admin::AdminSessionListResponse listRes;
+        AdminSessionListSnapshot listRes;
         bool haveList = false;
         {
             std::lock_guard lock(m_AdminMutex);
@@ -513,7 +513,7 @@ private:
         if (haveList)
         {
             ImGui::Text("Total : %u   Offset : %u   Shown : %d",
-                listRes.total(), listRes.offset(), listRes.sessions_size());
+                listRes.Total, listRes.Offset, static_cast<int>(listRes.Sessions.size()));
 
             if (ImGui::BeginTable("Sessions", 4,
                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
@@ -525,18 +525,17 @@ private:
                 ImGui::TableSetupColumn("TX");
                 ImGui::TableHeadersRow();
 
-                for (int i = 0; i < listRes.sessions_size(); ++i)
+                for (const auto& s : listRes.Sessions)
                 {
-                    const auto& s = listRes.sessions(i);
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0); ImGui::Text("%llu",
-                        static_cast<unsigned long long>(s.session_id()));
+                        static_cast<unsigned long long>(s.SessionId));
                     ImGui::TableSetColumnIndex(1); ImGui::Text("%lld",
-                        static_cast<long long>(s.last_recv_ms()));
+                        static_cast<long long>(s.LastRecvMs));
                     ImGui::TableSetColumnIndex(2); ImGui::Text("%s",
-                        FormatBytes(s.rx_bytes()).c_str());
+                        FormatBytes(s.RxBytes).c_str());
                     ImGui::TableSetColumnIndex(3); ImGui::Text("%s",
-                        FormatBytes(s.tx_bytes()).c_str());
+                        FormatBytes(s.TxBytes).c_str());
                 }
                 ImGui::EndTable();
             }
@@ -888,8 +887,8 @@ private:
     std::mutex                                               m_AdminMutex;
     bool                                                     m_bAdminSummaryValid     { false };
     bool                                                     m_bAdminSessionListValid { false };
-    ::fastport::protocols::admin::AdminStatusSummaryResponse m_AdminSummary;
-    ::fastport::protocols::admin::AdminSessionListResponse   m_AdminSessionList;
+    AdminSummarySnapshot                                     m_AdminSummary;
+    AdminSessionListSnapshot                                 m_AdminSessionList;
 
     // Design Ref: iosession-lifetime-race §5.1, §5.3 — Stress 탭 상태.
     // 기본값은 Design §8.5 / Plan Q10 의 최종 stress 사양(10k / 100 churn/s / 300s).

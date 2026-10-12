@@ -2,7 +2,9 @@ module;
 
 #include <cstdint>
 #include <WinSock2.h>
-#include <google/protobuf/message.h>
+
+// protobuf 는 전방 선언만 사용 — 사유는 LibNetworks/ProtobufFwd.h 주석 참고 (MSVC C1116 ICE).
+#include "LibNetworks/ProtobufFwd.h"
 
 export module benchmark.session;
 

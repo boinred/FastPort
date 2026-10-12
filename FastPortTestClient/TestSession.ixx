@@ -10,11 +10,11 @@ module;
 #include <chrono>
 #include <atomic>
 #include <functional>
-#include <spdlog/spdlog.h>
+#include <vector>
 
-#include "Protocols/Commons.pb.h"
-#include "Protocols/Tests.pb.h"
-#include "Protocols/Admin.pb.h"
+// .pb.h 는 인터페이스 GMF 에서 include 하지 않는다. IFC 에 protobuf 정의가 실리면 MSVC 14.51.36231 이
+// importer 쪽에서 C1116 ICE / C2504 를 낸다 (LibNetworks/INetworkSession.ixx 주석 참고).
+// 메시지를 생성/파싱하는 멤버는 TestSession.cpp 에 구현하고, Admin 응답은 아래 plain struct 로 변환해 전달.
 
 export module test_client.test_session;
 
@@ -22,9 +22,44 @@ import networks.sessions.outbound_session;
 import networks.core.socket;
 import networks.core.packet;
 import commons.buffers.ibuffer;
-import commons.buffers.circle_buffer_queue;
-import commons.logger;
 import test_client.metrics_collector;
+
+// Design Ref: server-status §5.2 — Admin 응답 스냅샷 (protobuf 비의존).
+// AdminStatusSummaryResponse / AdminSessionListResponse 에서 UI 가 쓰는 필드만 복사.
+export enum class AdminServerMode
+{
+    Unknown,
+    IOCP,
+    RIO,
+};
+
+export struct AdminSummarySnapshot
+{
+    AdminServerMode ServerMode = AdminServerMode::Unknown;
+    uint64_t ServerUptimeMs = 0;
+    uint32_t ActiveSessionCount = 0;
+    uint64_t TotalRxBytes = 0;
+    uint64_t TotalTxBytes = 0;
+    uint64_t IdleDisconnectCount = 0;
+    uint64_t ProcessMemoryBytes = 0;
+    double ProcessCpuPercent = 0.0;
+    uint64_t ServerTimestampMs = 0;
+};
+
+export struct AdminSessionInfoSnapshot
+{
+    uint64_t SessionId = 0;
+    int64_t LastRecvMs = 0;
+    uint64_t RxBytes = 0;
+    uint64_t TxBytes = 0;
+};
+
+export struct AdminSessionListSnapshot
+{
+    uint32_t Total = 0;
+    uint32_t Offset = 0;
+    std::vector<AdminSessionInfoSnapshot> Sessions;
+};
 
 export class TestSession : public LibNetworks::Sessions::OutboundSession
 {
@@ -50,51 +85,16 @@ public:
     void SetDisconnectedCallback(DisconnectedCallback cb) { m_DisconnectedCb = std::move(cb); }
 
     // Design Ref: server-status §5.2 — Admin 응답 콜백. AdminPanel 이 등록.
-    using AdminSummaryCallback = std::function<void(const ::fastport::protocols::admin::AdminStatusSummaryResponse&)>;
-    using AdminSessionListCallback = std::function<void(const ::fastport::protocols::admin::AdminSessionListResponse&)>;
+    using AdminSummaryCallback = std::function<void(const AdminSummarySnapshot&)>;
+    using AdminSessionListCallback = std::function<void(const AdminSessionListSnapshot&)>;
     void SetAdminSummaryCallback(AdminSummaryCallback cb) { m_AdminSummaryCb = std::move(cb); }
     void SetAdminSessionListCallback(AdminSessionListCallback cb) { m_AdminSessionListCb = std::move(cb); }
 
-    // Admin 요청 송신 — 서버의 0x8001/0x8003 엔드포인트로.
-    void SendAdminSummaryRequest()
-    {
-        ::fastport::protocols::admin::AdminStatusSummaryRequest request;
-        auto pHeader = request.mutable_header();
-        pHeader->set_request_id(m_NextRequestId++);
-        pHeader->set_timestamp_ms(static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count()));
-        SendMessage(0x8001, request);
-    }
+    // Admin 요청 송신 — 서버의 0x8001/0x8003 엔드포인트로. (구현: TestSession.cpp)
+    void SendAdminSummaryRequest();
+    void SendAdminSessionListRequest(uint32_t offset, uint32_t limit);
 
-    void SendAdminSessionListRequest(uint32_t offset, uint32_t limit)
-    {
-        ::fastport::protocols::admin::AdminSessionListRequest request;
-        auto pHeader = request.mutable_header();
-        pHeader->set_request_id(m_NextRequestId++);
-        pHeader->set_timestamp_ms(static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count()));
-        request.set_offset(offset);
-        request.set_limit(limit);
-        SendMessage(0x8003, request);
-    }
-
-    void SendEcho(const char* message)
-    {
-        m_LastSendTime = std::chrono::steady_clock::now();
-        m_SendEchoCount.fetch_add(1, std::memory_order_relaxed);
-
-        ::fastport::protocols::tests::EchoRequest request;
-        auto pHeader = request.mutable_header();
-        pHeader->set_request_id(m_NextRequestId++);
-        pHeader->set_timestamp_ms(static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                m_LastSendTime.time_since_epoch()).count()));
-        request.set_data_str(message);
-
-        SendMessage(::fastport::protocols::commons::ProtocolId::PROTOCOL_ID_TESTS, request);
-    }
+    void SendEcho(const char* message);
 
     // Design Ref: iosession-lifetime-race §5.2 — Stress echo payload.
     // Ping-pong 에서 사용할 payload 를 세션별로 지정. 비어있으면 "echo" 기본 사용.
@@ -156,49 +156,8 @@ public:
         }
     }
 
-    void OnPacketReceived(const LibNetworks::Core::Packet& rfPacket) override
-    {
-        const auto packetId = rfPacket.GetPacketId();
-
-        // Design Ref: server-status §5.2 — Admin 응답은 콜백으로 전달.
-        if (packetId == 0x8002)
-        {
-            ::fastport::protocols::admin::AdminStatusSummaryResponse response;
-            if (rfPacket.ParseMessage(response) && m_AdminSummaryCb)
-            {
-                m_AdminSummaryCb(response);
-            }
-            return;
-        }
-        if (packetId == 0x8004)
-        {
-            ::fastport::protocols::admin::AdminSessionListResponse response;
-            if (rfPacket.ParseMessage(response) && m_AdminSessionListCb)
-            {
-                m_AdminSessionListCb(response);
-            }
-            return;
-        }
-
-        auto recvTime = std::chrono::steady_clock::now();
-        double rttMs = std::chrono::duration<double, std::milli>(recvTime - m_LastSendTime).count();
-
-        m_EchoCount.fetch_add(1, std::memory_order_relaxed);
-
-        if (m_pMetrics)
-        {
-            m_pMetrics->RecordLatency(rttMs);
-            m_pMetrics->RecordMessage();
-        }
-
-        // 에코 테스트 잔여 횟수가 있으면 계속 전송
-        if (m_RemainingEchos.load(std::memory_order_relaxed) > 0)
-        {
-            m_RemainingEchos.fetch_sub(1, std::memory_order_relaxed);
-            const char* payload = m_EchoPayload.empty() ? "echo" : m_EchoPayload.c_str();
-            SendEcho(payload);
-        }
-    }
+    // (구현: TestSession.cpp)
+    void OnPacketReceived(const LibNetworks::Core::Packet& rfPacket) override;
 
     void OnSent(size_t bytesSent) override
     {

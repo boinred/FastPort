@@ -9,6 +9,7 @@
 #include <span>
 #include <chrono>
 #include <cstdint>
+#include <google/protobuf/message.h>
 
 module networks.sessions.io_session;
 

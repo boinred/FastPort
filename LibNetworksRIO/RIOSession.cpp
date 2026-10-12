@@ -9,6 +9,7 @@
 #include <mutex>
 #include <span>
 #include <spdlog/spdlog.h>
+#include <google/protobuf/message.h>
 
 module networks.sessions.rio_session;
 
