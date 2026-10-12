@@ -15,6 +15,7 @@
 | [C++ 최신 기능 활용](CPP_MODERN_FEATURES.md) | C++20/23 최적화 포인트 |
 | [벤치마크 가이드](BENCHMARK_GUIDE.md) | 성능 측정 도구 사용법 |
 | [현재 벤치마크 기준선](benchmark-results-05-iocp-release-1000-sessions.md) | IOCP Release 서비스 모드 1000세션 기준 성능 |
+| [TODO](TODO.md) | 코드 분석 기반 버그/성능 작업 목록 |
 
 ## 🔗 관련 링크
 
