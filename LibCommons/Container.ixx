@@ -28,9 +28,13 @@ public:
 
     bool Add(const Key& key, T value)
     {
-        auto lock = WriteLockBlock(m_Lock);
-        auto [it, inserted] = m_Storage.emplace(key, std::move(value));
-        return inserted;
+    
+        if (auto lock = WriteLockBlock(m_Lock))
+        {
+            auto [it, inserted] = m_Storage.emplace(key, std::move(value));
+            return inserted;
+        }
+        return false; 
     }
 
     template<typename... Args>
